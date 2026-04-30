@@ -1,0 +1,986 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="description" content="Dynamical Systems Orchestration — a generative music installation driven by a lava lamp. Real-time topological data analysis, flow-advected tracking, and physics-informed sound synthesis by Samuel D. Leventhal.">
+    <meta name="keywords" content="Samuel Leventhal, generative music, lava lamp, persistent homology, topological data analysis, SuperCollider, computer vision, GUDHI">
+    <meta name="author" content="Samuel D. Leventhal">
+
+    <!-- Open Graph -->
+    <meta property="og:title" content="Dynamical Systems Orchestration">
+    <meta property="og:description" content="A generative music installation driven by a lava lamp. Persistent homology, flow-advected tracking, and a closed acoustic feedback loop.">
+    <meta property="og:type" content="article">
+    <meta property="og:url" content="https://samleventhal.com/dynamical-systems-orchestration">
+
+    <title>Dynamic Systems Orchestration (Lava Lamp Synth) | Samuel D. Leventhal</title>
+
+    <!-- Fonts -->
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Cormorant+Garamond:ital,wght@0,400;0,600;0,700;1,400&family=Source+Sans+3:wght@300;400;500;600&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+
+    <style>
+        :root {
+            --color-bg: #faf9f7;
+            --color-bg-alt: #f0efed;
+            --color-text: #2c2c2c;
+            --color-text-muted: #5a5a5a;
+            --color-accent: #8b2332;
+            --color-accent-light: #a83344;
+            --color-accent-warm: #c4673a;
+            --color-border: #d4d2cf;
+            --color-code-bg: #2c2a28;
+            --color-code-text: #f0efed;
+
+            --font-display: 'Cormorant Garamond', Georgia, serif;
+            --font-body: 'Source Sans 3', -apple-system, BlinkMacSystemFont, sans-serif;
+            --font-mono: 'JetBrains Mono', Menlo, Consolas, monospace;
+
+            --max-width: 900px;
+            --spacing-unit: 1rem;
+        }
+
+        *, *::before, *::after { box-sizing: border-box; }
+
+        html { scroll-behavior: smooth; }
+
+        body {
+            margin: 0;
+            padding: 0;
+            font-family: var(--font-body);
+            font-size: 17px;
+            font-weight: 400;
+            line-height: 1.7;
+            color: var(--color-text);
+            background-color: var(--color-bg);
+            -webkit-font-smoothing: antialiased;
+            -moz-osx-font-smoothing: grayscale;
+        }
+
+        /* Header with animated lamp */
+        .project-header {
+            position: relative;
+            width: 100%;
+            min-height: 360px;
+            overflow: hidden;
+            background: linear-gradient(180deg, var(--color-bg) 0%, var(--color-bg-alt) 100%);
+            border-bottom: 1px solid var(--color-border);
+        }
+
+        .header-inner {
+            position: relative;
+            max-width: var(--max-width);
+            margin: 0 auto;
+            padding: calc(var(--spacing-unit) * 4) var(--spacing-unit) calc(var(--spacing-unit) * 3);
+            display: grid;
+            grid-template-columns: 1fr auto;
+            gap: 2rem;
+            align-items: center;
+        }
+
+        .header-text h1 {
+            font-family: var(--font-display);
+            font-size: clamp(2.2rem, 5vw, 3.4rem);
+            font-weight: 600;
+            line-height: 1.1;
+            margin: 0 0 0.5rem;
+            color: var(--color-text);
+            letter-spacing: -0.02em;
+        }
+
+        .header-text .subtitle {
+            font-family: var(--font-display);
+            font-style: italic;
+            font-size: 1.25rem;
+            color: var(--color-text-muted);
+            margin: 0 0 1rem;
+        }
+
+        .header-text .tag {
+            display: inline-block;
+            font-family: var(--font-body);
+            font-size: 0.8rem;
+            font-weight: 500;
+            text-transform: uppercase;
+            letter-spacing: 0.12em;
+            color: var(--color-accent);
+            padding: 0.3rem 0.7rem;
+            border: 1px solid var(--color-accent);
+            border-radius: 2px;
+        }
+
+        /* CSS-only lava lamp animation */
+        .lamp {
+            width: 110px;
+            height: 280px;
+            position: relative;
+            filter: drop-shadow(0 4px 12px rgba(139, 35, 50, 0.15));
+        }
+
+        .lamp-cap, .lamp-base {
+            position: absolute;
+            left: 50%;
+            transform: translateX(-50%);
+            background: linear-gradient(180deg, #4a3a30 0%, #2c2320 100%);
+            border-radius: 4px;
+        }
+        .lamp-cap {
+            top: 0;
+            width: 55px;
+            height: 18px;
+            border-radius: 3px 3px 0 0;
+        }
+        .lamp-base {
+            bottom: 0;
+            width: 95px;
+            height: 30px;
+            border-radius: 0 0 6px 6px;
+            background: linear-gradient(180deg, #3a2c25 0%, #1e1815 100%);
+        }
+
+        .lamp-glass {
+            position: absolute;
+            top: 18px;
+            bottom: 30px;
+            left: 50%;
+            transform: translateX(-50%);
+            width: 90px;
+            background: linear-gradient(180deg,
+                rgba(255, 230, 180, 0.15) 0%,
+                rgba(255, 180, 120, 0.22) 50%,
+                rgba(200, 80, 60, 0.18) 100%);
+            border: 1px solid rgba(255, 255, 255, 0.4);
+            border-radius: 45% 45% 8px 8px / 60px 60px 8px 8px;
+            overflow: hidden;
+        }
+
+        .blob {
+            position: absolute;
+            border-radius: 50%;
+            background: radial-gradient(circle at 30% 30%,
+                var(--color-accent-warm) 0%,
+                var(--color-accent) 60%,
+                #6b1a26 100%);
+            filter: blur(1px);
+            opacity: 0.85;
+        }
+        .blob-1 {
+            width: 32px; height: 32px;
+            left: 15px;
+            animation: rise-a 14s ease-in-out infinite;
+        }
+        .blob-2 {
+            width: 22px; height: 22px;
+            right: 18px;
+            animation: rise-b 18s ease-in-out infinite;
+            animation-delay: -4s;
+        }
+        .blob-3 {
+            width: 40px; height: 40px;
+            left: 30px;
+            animation: rise-c 22s ease-in-out infinite;
+            animation-delay: -10s;
+        }
+
+        @keyframes rise-a {
+            0%, 100% { top: 85%; transform: scale(1, 0.85); }
+            20%   { top: 70%; transform: scale(1.1, 0.95); }
+            50%   { top: 20%; transform: scale(0.9, 1.1); }
+            80%   { top: 65%; transform: scale(1.05, 0.9); }
+        }
+        @keyframes rise-b {
+            0%, 100% { top: 10%; transform: scale(0.9, 1.1); }
+            30%   { top: 55%; transform: scale(1.1, 0.9); }
+            60%   { top: 80%; transform: scale(1, 0.85); }
+            85%   { top: 40%; transform: scale(0.95, 1); }
+        }
+        @keyframes rise-c {
+            0%, 100% { top: 75%; transform: scale(1.1, 0.9); }
+            25%   { top: 45%; transform: scale(0.85, 1.15); }
+            55%   { top: 5%;  transform: scale(0.95, 1.05); }
+            80%   { top: 50%; transform: scale(1, 0.95); }
+        }
+
+        /* Navigation */
+        nav {
+            position: sticky;
+            top: 0;
+            z-index: 100;
+            background: var(--color-bg);
+            border-bottom: 1px solid var(--color-border);
+            padding: 0.75rem 0;
+        }
+        nav ul {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 0.5rem 1.8rem;
+            justify-content: center;
+            list-style: none;
+            margin: 0 auto;
+            padding: 0 var(--spacing-unit);
+            max-width: var(--max-width);
+        }
+        nav a {
+            font-family: var(--font-body);
+            font-size: 0.82rem;
+            font-weight: 500;
+            text-transform: uppercase;
+            letter-spacing: 0.08em;
+            color: var(--color-text-muted);
+            text-decoration: none;
+            padding: 0.3rem 0;
+            border-bottom: 1px solid transparent;
+            transition: color 0.2s ease, border-color 0.2s ease;
+            cursor: pointer;
+        }
+        nav a:hover {
+            color: var(--color-accent);
+            border-bottom-color: var(--color-accent);
+        }
+
+        /* Main */
+        main {
+            max-width: var(--max-width);
+            margin: 0 auto;
+            padding: calc(var(--spacing-unit) * 3) var(--spacing-unit);
+        }
+        section { margin-bottom: calc(var(--spacing-unit) * 4); scroll-margin-top: 4rem; }
+
+        h2 {
+            font-family: var(--font-display);
+            font-size: 2rem;
+            font-weight: 600;
+            color: var(--color-text);
+            margin: 0 0 1.5rem;
+            padding-bottom: 0.5rem;
+            border-bottom: 2px solid var(--color-accent);
+            display: inline-block;
+        }
+        h3 {
+            font-family: var(--font-display);
+            font-size: 1.35rem;
+            font-weight: 600;
+            color: var(--color-text);
+            margin: 2rem 0 0.6rem;
+        }
+        h4 {
+            font-family: var(--font-body);
+            font-size: 1rem;
+            font-weight: 600;
+            text-transform: uppercase;
+            letter-spacing: 0.06em;
+            color: var(--color-accent);
+            margin: 1.4rem 0 0.5rem;
+        }
+        p { margin: 0 0 1rem; }
+
+        a {
+            color: var(--color-accent);
+            text-decoration: none;
+            border-bottom: 1px solid transparent;
+            transition: border-color 0.2s ease;
+        }
+        a:hover { border-bottom-color: var(--color-accent); }
+
+        /* Lead paragraph */
+        .lead {
+            font-family: var(--font-display);
+            font-size: 1.3rem;
+            line-height: 1.55;
+            font-weight: 400;
+            font-style: italic;
+            color: var(--color-text-muted);
+            margin-bottom: 1.5rem;
+        }
+
+        /* Key metadata strip */
+        .meta-strip {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
+            gap: 1rem 2rem;
+            padding: 1.25rem 1.5rem;
+            margin: 1.5rem 0 2rem;
+            background: var(--color-bg-alt);
+            border-left: 3px solid var(--color-accent);
+            border-radius: 0 4px 4px 0;
+        }
+        .meta-item .label {
+            display: block;
+            font-size: 0.72rem;
+            text-transform: uppercase;
+            letter-spacing: 0.1em;
+            color: var(--color-text-muted);
+            margin-bottom: 0.2rem;
+        }
+        .meta-item .value {
+            font-family: var(--font-display);
+            font-size: 1.05rem;
+            font-weight: 600;
+            color: var(--color-text);
+        }
+
+        /* Stage cards */
+        .stages {
+            display: grid;
+            gap: 1.25rem;
+            counter-reset: stage;
+        }
+        .stage {
+            display: grid;
+            grid-template-columns: auto 1fr;
+            gap: 1.25rem;
+            padding: 1.25rem 1.5rem;
+            background: var(--color-bg-alt);
+            border-radius: 6px;
+            border-left: 3px solid var(--color-accent);
+        }
+        .stage-num {
+            counter-increment: stage;
+            font-family: var(--font-display);
+            font-size: 2rem;
+            font-weight: 600;
+            color: var(--color-accent);
+            line-height: 1;
+            min-width: 2.5rem;
+        }
+        .stage-num::before { content: counter(stage, decimal-leading-zero); }
+        .stage h3 {
+            margin: 0 0 0.4rem;
+            font-size: 1.2rem;
+        }
+        .stage p { margin: 0; font-size: 0.98rem; }
+
+        /* Version timeline */
+        .versions {
+            position: relative;
+            padding-left: 1.5rem;
+            border-left: 2px solid var(--color-border);
+            margin: 1rem 0;
+        }
+        .version {
+            position: relative;
+            padding: 0.5rem 0 1.5rem 0.5rem;
+        }
+        .version::before {
+            content: '';
+            position: absolute;
+            left: -1.95rem;
+            top: 0.9rem;
+            width: 11px;
+            height: 11px;
+            border-radius: 50%;
+            background: var(--color-bg);
+            border: 2px solid var(--color-accent);
+        }
+        .version.current::before {
+            background: var(--color-accent);
+            box-shadow: 0 0 0 4px rgba(139, 35, 50, 0.15);
+        }
+        .version h3 {
+            margin: 0 0 0.4rem;
+            font-size: 1.15rem;
+        }
+        .version h3 .v-tag {
+            display: inline-block;
+            font-family: var(--font-mono);
+            font-size: 0.75rem;
+            font-weight: 500;
+            color: var(--color-accent);
+            background: rgba(139, 35, 50, 0.08);
+            padding: 0.1rem 0.5rem;
+            border-radius: 3px;
+            margin-right: 0.5rem;
+            vertical-align: middle;
+            letter-spacing: 0.02em;
+        }
+        .version p { margin: 0 0 0.5rem; font-size: 0.96rem; }
+        .version .current-tag {
+            font-family: var(--font-body);
+            font-size: 0.7rem;
+            font-weight: 600;
+            text-transform: uppercase;
+            letter-spacing: 0.1em;
+            color: var(--color-bg);
+            background: var(--color-accent);
+            padding: 0.12rem 0.5rem;
+            border-radius: 2px;
+            margin-left: 0.4rem;
+            vertical-align: middle;
+        }
+
+        /* Pipeline diagram (ASCII) */
+        .pipeline {
+            font-family: var(--font-mono);
+            font-size: 0.78rem;
+            line-height: 1.55;
+            background: var(--color-code-bg);
+            color: var(--color-code-text);
+            padding: 1.5rem;
+            border-radius: 6px;
+            overflow-x: auto;
+            white-space: pre;
+            margin: 1.5rem 0;
+        }
+        .pipeline .accent { color: #e89a6a; }
+        .pipeline .dim { color: #8a857f; }
+        .pipeline .zombie { color: #d4a8b0; }
+
+        /* Inline code */
+        code {
+            font-family: var(--font-mono);
+            font-size: 0.87em;
+            background: var(--color-bg-alt);
+            padding: 0.12rem 0.35rem;
+            border-radius: 3px;
+            color: var(--color-text);
+        }
+
+        /* Deep dive cards */
+        .dive {
+            padding: 1.25rem 1.5rem;
+            background: var(--color-bg-alt);
+            border-radius: 6px;
+            margin-bottom: 1.25rem;
+        }
+        .dive h3 { margin-top: 0; }
+        .dive p:last-child { margin-bottom: 0; }
+
+        /* Parts table */
+        table {
+            width: 100%;
+            border-collapse: collapse;
+            margin: 1rem 0 1.5rem;
+            font-size: 0.94rem;
+        }
+        th, td {
+            text-align: left;
+            padding: 0.65rem 0.8rem;
+            border-bottom: 1px solid var(--color-border);
+            vertical-align: top;
+        }
+        th {
+            font-family: var(--font-body);
+            font-size: 0.78rem;
+            font-weight: 600;
+            text-transform: uppercase;
+            letter-spacing: 0.08em;
+            color: var(--color-text-muted);
+            background: var(--color-bg-alt);
+            border-bottom: 2px solid var(--color-border);
+        }
+        td.num { font-family: var(--font-mono); font-size: 0.88rem; color: var(--color-text-muted); white-space: nowrap; }
+
+        /* Milestones */
+        .milestones {
+            display: grid;
+            gap: 0.75rem;
+            margin: 1rem 0;
+        }
+        .milestone {
+            display: grid;
+            grid-template-columns: 4.5rem 8rem 1fr;
+            gap: 1rem;
+            align-items: baseline;
+            padding: 0.7rem 1rem;
+            border-bottom: 1px solid var(--color-border);
+        }
+        .milestone .m-tag {
+            font-family: var(--font-mono);
+            font-size: 0.82rem;
+            font-weight: 600;
+            color: var(--color-accent);
+        }
+        .milestone .m-label {
+            font-family: var(--font-body);
+            font-size: 0.78rem;
+            text-transform: uppercase;
+            letter-spacing: 0.06em;
+            color: var(--color-text-muted);
+        }
+        .milestone .m-desc { font-size: 0.95rem; }
+
+        /* Footer */
+        footer {
+            max-width: var(--max-width);
+            margin: 0 auto;
+            padding: 2rem var(--spacing-unit) 3rem;
+            border-top: 1px solid var(--color-border);
+            color: var(--color-text-muted);
+            font-size: 0.88rem;
+        }
+        footer .footer-flex {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            flex-wrap: wrap;
+            gap: 1rem;
+        }
+
+        /* Pull quote */
+        .pullquote {
+            font-family: var(--font-display);
+            font-style: italic;
+            font-size: 1.15rem;
+            line-height: 1.55;
+            color: var(--color-text-muted);
+            padding: 0.5rem 0 0.5rem 1.5rem;
+            border-left: 3px solid var(--color-accent);
+            margin: 1.5rem 0;
+        }
+
+        /* Project media */
+        .media-grid {
+            display: grid;
+            grid-template-columns: minmax(0, 260px) 1fr;
+            gap: 1.5rem;
+            margin: 1.25rem 0 1.5rem;
+            align-items: start;
+        }
+        .media-item { margin: 0; }
+        .media-item figcaption {
+            margin-top: 0.55rem;
+            font-family: var(--font-display);
+            font-style: italic;
+            font-size: 0.95rem;
+            color: var(--color-text-muted);
+        }
+        .video-frame {
+            position: relative;
+            width: 100%;
+            background: var(--color-code-bg);
+            border-radius: 6px;
+            overflow: hidden;
+            box-shadow: 0 2px 8px rgba(0, 0, 0, 0.08);
+        }
+        .video-frame iframe {
+            position: absolute;
+            inset: 0;
+            width: 100%;
+            height: 100%;
+            border: 0;
+        }
+        .video-frame-vertical { aspect-ratio: 9 / 16; }
+        .video-frame-wide { aspect-ratio: 16 / 9; }
+
+        .media-image {
+            margin: 0.5rem 0 0;
+        }
+        .media-image a {
+            display: block;
+            border: 0;
+            border-radius: 6px;
+            overflow: hidden;
+            box-shadow: 0 2px 8px rgba(0, 0, 0, 0.08);
+        }
+        .media-image a:hover { border-bottom: 0; }
+        .media-image img {
+            width: 100%;
+            height: auto;
+            display: block;
+        }
+
+        /* Responsive */
+        @media (max-width: 640px) {
+            .header-inner { grid-template-columns: 1fr; text-align: left; }
+            .lamp { display: none; }
+            .milestone { grid-template-columns: 1fr; gap: 0.2rem; padding-bottom: 1rem; }
+            .stage { grid-template-columns: 1fr; gap: 0.3rem; }
+            .pipeline { font-size: 0.66rem; padding: 1rem; }
+            .media-grid { grid-template-columns: 1fr; }
+            .media-grid .media-item:first-child { max-width: 280px; margin: 0 auto; }
+        }
+    </style>
+</head>
+<body>
+
+<!-- HEADER -->
+<header class="project-header">
+    <div class="header-inner">
+        <div class="header-text">
+            <span class="tag">Art × Research · v3.2</span>
+            <h1>Dynamic Systems Orchestration (Lava Lamp Synth)</h1>
+            <p class="subtitle">A generative music installation driven by a lava lamp</p>
+        </div>
+        <div class="lamp" aria-hidden="true">
+            <div class="lamp-cap"></div>
+            <div class="lamp-glass">
+                <div class="blob blob-1"></div>
+                <div class="blob blob-2"></div>
+                <div class="blob blob-3"></div>
+            </div>
+            <div class="lamp-base"></div>
+        </div>
+    </div>
+</header>
+
+<!-- NAV -->
+<nav>
+    <ul>
+        <li><a onclick="scrollToId('overview')">Overview</a></li>
+        <li><a onclick="scrollToId('media')">Media</a></li>
+        <li><a onclick="scrollToId('methodology')">Methodology</a></li>
+        <li><a onclick="scrollToId('architecture')">Architecture</a></li>
+        <li><a onclick="scrollToId('versions')">Versions</a></li>
+        <li><a onclick="scrollToId('deep-dives')">Deep Dives</a></li>
+        <li><a onclick="scrollToId('build')">Build</a></li>
+        <li><a onclick="scrollToId('timeline')">Timeline</a></li>
+    </ul>
+</nav>
+
+<main>
+
+<!-- OVERVIEW -->
+<section id="overview">
+    <h2>Overview</h2>
+    <p class="lead">A lava lamp — a physical, analogue, thermodynamic system — is filmed continuously and translated, in real time, into continuous evolving audio. Lava lamp 'blobs' spawn a voice when they are detected. Each blob's location, coloration, and geometry is tracked throughout the span of it's 'life'. To accomplish this topological data analysis based on on persistence, motion tracking using statistical attributes from image samples of the lamp and the physical dynamics of buoyant objects, and histogram matching based on hue are all employed.
+    <p> Each blob's respective voice, and contribution to the total score's orchestration, changes depending on the blobs travel, assumed temperature based on coloration, and geometric evolution.</p>
+    </p>
+  
+
+    <div class="meta-strip">
+        <div class="meta-item"><span class="label">Status</span><span class="value">v3.2 · macOS</span></div>
+        <div class="meta-item"><span class="label">Compute</span><span class="value">MacBook Pro + ESP32</span></div>
+        <div class="meta-item"><span class="label">Vision</span><span class="value">OpenCV · GUDHI</span></div>
+        <div class="meta-item"><span class="label">Audio</span><span class="value">SuperCollider · DeepMind 6</span></div>
+    </div>
+
+    <h3>The central idea</h3>
+    <p>The lava lamp is a dynamical score — a dissipative physical system whose blob lifecycle (birth, death, merge, split, turning) drives compositional events. The novel methodological contribution sits at the intersection of topological data analysis and environmental art: persistent homology quantifies the significance of each wax blob as a contrast-against-surroundings measure, rather than as a threshold on raw intensity or pixel area. A dim but isolated blob (topologically salient) drives a voice; a bright but indistinct region (topologically noisy) does not.</p>
+
+    <h3>Why this architecture exists</h3>
+    <p>Three timescale mismatches make naïve approaches fail. First, blob cycles last 90–180 seconds while MIDI events last milliseconds; bridging requires deliberate multi-layer design, not per-frame mapping. Second, position is the least stable feature of a lava lamp blob — wax moves slowly and gets occluded often — while topological signature (birth, death) and thermodynamic state (hue) are comparatively stable. Third, detection is inherently intermittent: wax can become momentarily transparent, two blobs can pool into one, background subtraction can absorb stationary material.</p>
+
+    <p>v3.0/v3.1 fixed the first two by making the binary mask the identity carrier (advected by optical flow, refined by detection) and by matching in topological feature space rather than pixel space. v3.2 addresses the third by recognizing that turning points are special: wax decelerates, hue flips, MOG2 forgets the now-stationary material, detection drops out, re-identification fails across the thermal transition, and the voice manager stacks release tails as the same physical blob is born and killed repeatedly. The four v3.2 changes each attack a different link in that cascade.</p>
+
+    <blockquote class="pullquote">The wax reverses at the top; the voice doesn't.</blockquote>
+</section>
+
+<!-- MEDIA -->
+<section id="media">
+    <h2>Project Media</h2>
+    <p>Two short demonstrations of the system in operation, alongside a still from the calibration / initialization stage.</p>
+
+    <div class="media-grid">
+        <figure class="media-item">
+            <div class="video-frame video-frame-vertical">
+                <iframe src="https://www.youtube.com/embed/bQYmj0NVmkY?rel=0&amp;modestbranding=1"
+                        title="Lava Lamp Synth — short demo"
+                        loading="lazy"
+                        allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share"
+                        allowfullscreen></iframe>
+            </div>
+            <figcaption>Short demo — the system tracking and sounding live blob activity.</figcaption>
+        </figure>
+
+        <figure class="media-item">
+            <div class="video-frame video-frame-wide">
+                <iframe src="https://www.youtube.com/embed/Q0msmonSdzM?rel=0&amp;modestbranding=1"
+                        title="Lava Lamp Synth — extended demo"
+                        loading="lazy"
+                        allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share"
+                        allowfullscreen></iframe>
+            </div>
+            <figcaption>Extended walkthrough of detection, tracking, and synthesis.</figcaption>
+        </figure>
+    </div>
+
+    <figure class="media-item media-image">
+        <a href="/subpages/lava_lamp_synth/lavalampinitialization.JPG" target="_blank" rel="noopener">
+            <img src="/subpages/lava_lamp_synth/lavalampinitialization.JPG"
+                 alt="Lava lamp synth initialization — calibration view of the lamp ROI and wax detection"
+                 loading="lazy">
+        </a>
+        <figcaption>Initialization / calibration view — lamp ROI, wax HSV mask, and persistence-thresholded blob detections. <a href="/subpages/lava_lamp_synth/lavalampinitialization.JPG" target="_blank" rel="noopener">Open full size</a>.</figcaption>
+    </figure>
+</section>
+
+<!-- METHODOLOGY -->
+<section id="methodology">
+    <h2>Methodology at a Glance</h2>
+    <p>A single camera frame flows through six conceptual stages. All six are active in Phase 1 (single-camera proof of concept); Phase 2 extends each with additional camera feeds and hardware.</p>
+
+    <div class="stages">
+        <div class="stage">
+            <div class="stage-num"></div>
+            <div>
+                <h3>Calibration</h3>
+                <p>Once at startup. The calibration GUI captures a frozen camera frame and lets the user draw freehand around visible wax blobs plus a rectangle for the lamp ROI. From the drawn pixels it derives HSV range, area bounds, lamp geometry, and thermodynamic hue thresholds. Written to <code>lamp_profile.json</code> and loaded automatically thereafter.</p>
+            </div>
+        </div>
+        <div class="stage">
+            <div class="stage-num"></div>
+            <div>
+                <h3>Detection</h3>
+                <p>Every frame. MOG2 foreground ∩ wax-colour HSV mask → morphological clean-up → GUDHI CubicalComplex H0 persistence on the masked greyscale → filter by persistence threshold → contour moments → circular mean hue → thermodynamic direction (rising / falling / turning). In v3.2, the MOG2 learning rate is frozen to <code>1e-4</code> after warm-up so stationary wax stays in the foreground.</p>
+            </div>
+        </div>
+        <div class="stage">
+            <div class="stage-num"></div>
+            <div>
+                <h3>Flow Advection &amp; Matching</h3>
+                <p>Every frame. Farneback dense optical flow between previous and current greyscale. Every track's mask is inverse-warp remapped forward by the flow. IoU between advected masks and detections determines primary matches; ambiguous overlaps are resolved by Wasserstein-inspired distance in the (birth, death) plane. Unmatched detections are checked against the fingerprint buffer for re-identification. Coasting tracks survive up to <code>MAX_COAST = 20</code> frames.</p>
+            </div>
+        </div>
+        <div class="stage">
+            <div class="stage-num"></div>
+            <div>
+                <h3>Physics Kalman Update</h3>
+                <p>Every frame. Each matched track's 5-state Kalman filter <code>[x, y, vx, vy, ay]</code> is corrected with the detection measurement. Measurement noise adapts based on y-position: near the lamp top/bottom, noise is high (trust physics); mid-column, noise is low (trust detection). The <code>ay</code> state mean-reverts toward zero and is initialised with a directional prior from thermodynamic direction.</p>
+            </div>
+        </div>
+        <div class="stage">
+            <div class="stage-num"></div>
+            <div>
+                <h3>Musical Intelligence</h3>
+                <p>Every frame. The voice manager maintains one <code>blobVoice</code> (filtered saw) and one <code>blobAngle</code> (orientation-panned sine pad) per active blob; a <code>blobStrike</code> transient fires on birth. In v3.2, when a blob disappears, its voice enters a <em>zombie pool</em>: the SC node stays alive at reduced sustain for a 4-second window, during which a nearby compatible blob can resurrect it in place rather than triggering a fresh spawn and release-tail stack.</p>
+            </div>
+        </div>
+        <div class="stage">
+            <div class="stage-num"></div>
+            <div>
+                <h3>Physical Feedback (Phase 2)</h3>
+                <p>A speaker mounted inside the lamp plinth is driven by the ESP32 at frequencies calculated from the current blob state. Acoustic vibrations modulate wax convection, which changes blob behaviour, which the camera films, which changes the music. The loop closes: the lamp is actively shaped by the sound it is generating.</p>
+            </div>
+        </div>
+    </div>
+</section>
+
+<!-- ARCHITECTURE -->
+<section id="architecture">
+    <h2>Pipeline Architecture</h2>
+    <p>The pipeline runs as a continuous loop at roughly 15 fps. Since v3.0, blob identity is no longer solved as a per-frame assignment problem: it is carried forward by the flow-advected mask and only re-evaluated when a mask overlaps ambiguously with multiple detections or when a new detection appears uncovered by any existing mask. v3.2 adds a second identity layer at the voice manager, where SC synth nodes are preserved across short-lived tracker gaps via the zombie pool.</p>
+
+<div class="pipeline">USB Camera (1280×960 @ 15 fps)
+        │
+        ▼
+<span class="accent">blob_detection.py</span>  [BlobDetector · stateful, owns MOG2]
+        MOG2 (history=500, varThreshold=16) <span class="dim">← v3.2: learning_rate=1e-4 post-warmup</span>
+        ∩ Wax colour HSV mask (from lamp_profile)
+        → Morphological clean (7×7 close, 5×5 open)
+        → GUDHI CubicalComplex H0 persistence (downscale=4)
+        → Filter by pers_thresh
+        → Contour moments (orientation, elongation, hu[7])
+        → Circular mean hue (wrap-safe)
+        → Direction: rising | falling | turning
+        │
+        ▼ [PersistentBlob] sorted by persistence desc
+<span class="accent">blob_tracker.py</span>  [BlobTracker]
+   A. Farneback dense flow
+   B. Advect all track masks (inverse-warp)
+   C. IoU matching (threshold=0.25)
+   D. Wasserstein resolution (topo 0.75, pos 0.15, hue 0.10)
+   E. Mask refinement every 5 frames (50/50 blend)
+   F. Physics Kalman correct [x, y, vx, vy, ay]
+   G. Coast / retire <span class="dim">← v3.2: max_coast=20</span>
+   H. Fingerprint re-ID <span class="dim">← v3.2: hue weight /60 (was /25)</span>
+        │
+        ▼ [TrackedBlob] + events: birth | death | merge | split
+<span class="accent">voice_manager.py</span>  [VoiceManager]
+   y_norm       → MIDI pentatonic C3–C6
+   persistence  → amplitude (sqrt)
+   birth        → filter cutoff (exp 200–6000 Hz)
+   elongation   → resonance
+   orientation  → blobAngle pan
+   mean_hue     → detune (±0.8%)
+   direction    → attack / release
+<span class="zombie">┌───────────────────────────────────────────────┐
+│  v3.2 ZOMBIE POOL                             │
+│  death → zombify (soft sustain, 4 s window)   │
+│  birth → try_resurrect before _spawn          │
+│  expiry → true gate=0 release                 │
+└───────────────────────────────────────────────┘</span>
+        │
+        ▼ OSC /s_new, /n_set → 127.0.0.1:57110
+<span class="accent">SuperCollider scsynth</span>
+        \blobVoice  (filtered saw, variable ASR envelope)
+        \blobAngle  (orientation-panned sine pad)
+        \blobStrike (Klank transient on birth only)
+        │
+        ▼
+Focusrite Scarlett Solo → Powered speakers
+        │
+        ▼ [Phase 2]
+ESP32 → 4" plinth speaker (acoustic feedback closes the loop)</div>
+
+    <h3>Temporal coherence</h3>
+    <p>A blob typically takes 90–180 seconds to rise from base to top. Four mechanisms preserve temporal coherence: (1) flow-advected identity at the tracker — the mask is always present, even when the detector loses the blob momentarily; (2) fingerprint re-identification — lost tracks are recoverable for 15 seconds by topological fingerprint; (3) zombie voice pool — sonic identity persists for a further 4 seconds beyond the tracker gap; (4) lifecycle events as compositional triggers — birth, death, and direction changes drive musical transitions, not per-frame pixel values. A blob rising for 90 seconds produces a single sustained musical gesture, not 1350 micro-events.</p>
+</section>
+
+<!-- VERSIONS -->
+<section id="versions">
+    <h2>Version History</h2>
+    <p>Four architectural iterations, each addressing concrete failure modes observed in the previous version. The progression reflects a shift from generic multi-object tracking toward domain-specific methods that exploit the unique physical properties of a lava lamp — and, most recently, toward preserving sonic identity across the detection gaps that physical-system noise inevitably produces.</p>
+
+    <div class="versions">
+        <div class="version">
+            <h3><span class="v-tag">v1.0</span>Initial Implementation</h3>
+            <p>OpenCV <code>SimpleBlobDetector</code> with HSV colour mask. Naive distance-threshold Hungarian assignment. Constant-velocity 4-state Kalman. Hardcoded <code>MIN_BLOB_AREA</code>. OSC bridge to SuperCollider with pitch / amplitude / pan mappings. No identity fingerprinting; spurious birth / death on every transparency fluctuation. No warm-up gate — hundreds of ghost IDs spawned during MOG2 stabilisation.</p>
+        </div>
+
+        <div class="version">
+            <h3><span class="v-tag">v2.0</span>Robust Four-Layer Tracking</h3>
+            <p><code>SimpleBlobDetector</code> replaced by GUDHI CubicalComplex H0 persistence — a topological significance filter in place of an area threshold. MOG2 became the primary foreground filter. Contour moments (orientation, elongation, Hu invariants) added to <code>PersistentBlob</code>. Kalman + Hungarian stack. Coast-and-retire with <code>MAX_COAST=8</code>. Three SuperCollider SynthDefs. MOG2 warm-up gate eliminated ghost IDs during model build.</p>
+        </div>
+
+        <div class="version">
+            <h3><span class="v-tag">v3.0 / v3.1</span>Physics-Grounded, Flow-Advected</h3>
+            <p>Optical flow mask advection replaced per-frame assignment as the primary identity carrier — identity is the mask, solved once at birth, not every frame. Wasserstein-inspired topological matching in the birth-death plane (75% weight) resolves ambiguous overlaps. A 5-state physics Kalman <code>[x, y, vx, vy, ay]</code> with buoyancy mean-reversion and directional <code>ay</code> priors handles turning-point dynamics. Birth topology fingerprinting enables re-identification after transparency gaps. Circular mean hue classified into rising / falling / turning direction drives attack / release envelopes and oscillator detuning.</p>
+        </div>
+
+        <div class="version current">
+            <h3><span class="v-tag">v3.2</span>Stability Against Turning-Point Storms<span class="current-tag">current</span></h3>
+            <p>Four targeted changes to eliminate the cascade of phantom births, deaths, and release-tail stacking that occurred when wax blobs reversed direction:</p>
+            <p><strong>(1) MAX_COAST 8 → 20 frames</strong> — tracks survive longer detection gaps, roughly 1.3 s at 15 fps instead of 0.5 s. <strong>(2) MOG2 learning rate throttled to 1e-4</strong> after warm-up, effectively freezing the background model, so stationary wax pooling at turning points is no longer absorbed into the background. <strong>(3) Hue term down-weighted</strong> in the fingerprint distance (divisor 25 → 60), so a full thermal reversal (~70° hue shift) no longer blows past the match threshold on its own. <strong>(4) Zombie voice slot-pool</strong> with resurrection window: when a tracker ID disappears, its voice is held at a soft sustain for up to 4 s rather than released; the next nearby blob with compatible persistence resurrects it in place. This eliminates release-tail stacking and preserves sonic identity across detector gaps the tracker itself could not bridge.</p>
+        </div>
+    </div>
+</section>
+
+<!-- DEEP DIVES -->
+<section id="deep-dives">
+    <h2>Technical Deep Dives</h2>
+
+    <div class="dive">
+        <h3>Persistent homology as a significance filter</h3>
+        <p>Rather than detecting blobs by thresholding intensity or filtering by area — both of which conflate size with significance — persistence measures how prominent a blob is relative to its local surroundings across a continuous range of intensity thresholds. The H0 persistence diagram treats the greyscale image as a scalar function: as a threshold sweeps from high to low intensity, connected components 'born' at blob peaks 'die' when they merge with a brighter neighbour. A blob's persistence is the intensity gap between its peak and the saddle point where it merges.</p>
+        <p>The input is inverted (<code>255.0 - small</code>) so OpenCV's 'bright = foreground' becomes 'low value = foreground' matching GUDHI's sublevel-set sweep. Downscaling to ~320×240 keeps <code>CubicalComplex</code> under ~40 ms on an M1 Mac.</p>
+    </div>
+
+    <div class="dive">
+        <h3>Flow-advected mask identity</h3>
+        <p>Farneback dense optical flow estimates a displacement vector at every pixel between consecutive frames. Each track owns a binary mask initialised at birth from the blob's detection contour. Every frame the mask is remapped forward using the inverse-warp of the flow field. Every <code>REFINE_INTERVAL = 5</code> frames the mask is 50/50 blended with the current detection contour, counteracting accumulated flow drift. A blob that briefly becomes semi-transparent and disappears from the persistence diagram does not fire a death event — the mask continues to exist and be advected forward.</p>
+    </div>
+
+    <div class="dive">
+        <h3>Wasserstein-inspired topological matching</h3>
+        <p>When multiple advected masks overlap a single detection, the system resolves the ambiguity using distance in the persistence diagram's birth–death plane rather than pixel space: <code>cost = 0.75·topo_dist + 0.15·pixel_dist + 0.10·hue_cost</code>. This is not full Wasserstein optimal transport — rather, a Wasserstein-inspired cost that prioritises topological feature space over ambient pixel space. Two blobs at similar positions but different thermal states are distinguished correctly where naïve position-based Hungarian would assign them arbitrarily.</p>
+    </div>
+
+    <div class="dive">
+        <h3>Physics-informed buoyancy Kalman</h3>
+        <p>The constant-velocity Kalman model assumes blobs move at fixed velocity between frames. Lava lamp blobs do not: they decelerate to near zero at the top and bottom as buoyancy force reverses, and accelerate through the middle column. The v3.x Kalman adds a fifth state variable <code>ay</code> (vertical acceleration), governed by mean-reverting dynamics and initialised with a directional prior (<code>+0.15</code> rising, <code>−0.15</code> falling, <code>0</code> turning).</p>
+        <p>Measurement noise adapts based on y-position. Within 12% of the lamp top/bottom, noise is <code>2.0</code> — the filter trusts its physics model more than the noisy detection. In mid-column it is <code>0.05</code> — detection dominates. This produces accurate predictions at the physically most important moments: turning points where identity ambiguity is highest.</p>
+    </div>
+
+    <div class="dive">
+        <h3>Birth topology fingerprinting</h3>
+        <p>When a track is retired, its fingerprint (birth, persistence, area, y_norm, mean_hue, direction) at the moment of loss is stored in the <code>ReidentificationBuffer</code>. New detections not matched to any existing mask are checked against the buffer before a birth event fires. The v3.2 hue divisor of 60 (up from 25) means a 70° hue flip now contributes 0.14 to the distance instead of 0.34 — leaving headroom for topological and positional terms to carry the match through a thermal reversal. Records expire after 15 seconds — long enough to cover a transparency gap, short enough that a genuine death does not linger.</p>
+    </div>
+
+    <div class="dive">
+        <h3>Thermodynamic hue as phase indicator</h3>
+        <p>Lava lamp wax undergoes a measurable hue shift across its thermal cycle. Wax near the heat source (about to rise) is hotter and slightly more yellow-orange; wax that has risen, cooled, and is falling is darker and more red. Circular mean hue is essential because OpenCV's H channel is periodic at 0/180 — a naïve arithmetic mean of <code>H=2</code> and <code>H=178</code> yields green, whereas the correct circular mean is red. Direction drives Kalman <code>ay</code> initialisation, voice-manager attack/release times, and the fingerprint-buffer direction penalty.</p>
+    </div>
+
+    <div class="dive">
+        <h3>The zombie voice pool</h3>
+        <p>The zombie pool is the sonic analogue of the tracker's flow-advected mask: SC synth nodes are preserved across short-lived tracker gaps, giving each blob a continuous audible identity even when detection fails entirely. It addresses the specific failure mode where a turning blob fires death → birth in rapid succession and the release tail of the dead voice stacks against the attack of the new voice — producing the ~9-second phantom polyphony that plagued v3.0 turning events.</p>
+        <p><strong>Lifecycle.</strong> On death, a blob_id's voice is moved from <code>self.voices</code> to <code>self._zombies</code>. The SC node stays alive (<code>gate=1</code>) but its amp is multiplied by <code>0.35</code>, audibly softening without triggering release. Before spawning a fresh voice for any new blob, the manager scans the zombie pool for a match within ~15% of lamp height whose persistence is within a factor of 3×. The closest match wins: its blob_id is rewritten and it re-enters <code>self.voices</code>, morphing seamlessly toward the new target values. Zombies older than <code>zombie_window = 4 s</code> release normally.</p>
+        <p><strong>Why soft sustain?</strong> Silent holds would click on resurrection. Full-amp holds would stack during coordinated turn events. <code>0.35</code> audibly softens (so the listener hears the blob 'rest') but retains enough level that smoothing back up reads as brightening rather than re-starting — matching the physical behaviour of wax pooling at a turning point.</p>
+    </div>
+</section>
+
+<!-- BUILD -->
+<section id="build">
+    <h2>Build</h2>
+
+    <h3>Phase 1 — Core Pipeline</h3>
+    <table>
+        <thead>
+            <tr><th>Component</th><th>Purpose</th><th class="num">Est. (GBP)</th></tr>
+        </thead>
+        <tbody>
+            <tr><td>MacBook Pro (M-series)</td><td>Vision pipeline, GUDHI, SuperCollider, MIDI</td><td class="num">£1,099+</td></tr>
+            <tr><td>Logitech Brio 4K / C922 Pro</td><td>Primary camera @ 1280×960</td><td class="num">£75–95</td></tr>
+            <tr><td>Focusrite Scarlett Solo (3rd gen)</td><td>Audio interface, stereo out + MIDI</td><td class="num">£110–130</td></tr>
+            <tr><td>Mathmos Astro lava lamp (500 ml)</td><td>Installation object</td><td class="num">£35–50</td></tr>
+            <tr><td>Yamaha HS5 (pair)</td><td>Powered studio monitors</td><td class="num">£120–300</td></tr>
+            <tr><td>Behringer DeepMind 6 Module</td><td>6-voice analogue polysynth (optional)</td><td class="num">£130–165</td></tr>
+        </tbody>
+    </table>
+
+    <h3>Phase 2 — Additional Components</h3>
+    <table>
+        <thead>
+            <tr><th>Component</th><th>Purpose</th><th class="num">Est. (GBP)</th></tr>
+        </thead>
+        <tbody>
+            <tr><td>Logitech C920 HD</td><td>Camera B: close crop upper zone (melodic voice)</td><td class="num">£55–70</td></tr>
+            <tr><td>Logitech C270 / C310</td><td>Camera C: base / heat zone (bass voice)</td><td class="num">£22–30</td></tr>
+            <tr><td>ESP32-S3 DevKitC-1 (N16R8)</td><td>Feedback speaker I2S, LED ring, watchdog</td><td class="num">£10–15</td></tr>
+            <tr><td>PCM5102A I2S DAC</td><td>ESP32 I2S DAC for plinth speaker</td><td class="num">£5–9</td></tr>
+            <tr><td>TPA3116D2 amplifier</td><td>Drives plinth speaker; 12V powered</td><td class="num">£8–14</td></tr>
+            <tr><td>4&quot; full-range speaker</td><td>Plinth feedback driver (Visaton FRS 10)</td><td class="num">£10–14</td></tr>
+            <tr><td>WS2812B LED ring (60)</td><td>Visual sync ring around lamp base</td><td class="num">£10–16</td></tr>
+            <tr><td>6 mm birch plywood sheets</td><td>Plinth construction</td><td class="num">£22–35</td></tr>
+        </tbody>
+    </table>
+
+    <h3>Software stack</h3>
+    <p>Python 3.11.9 pinned for macOS compatibility with GUDHI and current OpenCV wheels. Core dependencies: <code>opencv-python ≥ 4.8</code>, <code>numpy ≥ 1.24</code>, <code>gudhi ≥ 3.7</code>, <code>scipy ≥ 1.10</code>, <code>python-osc ≥ 1.8</code>, <code>torch</code> (MPS on Apple Silicon), <code>sounddevice</code>, <code>mido + python-rtmidi</code>, <code>pyserial</code>. <a href="https://supercollider.github.io">SuperCollider 3.13+</a> for the synthesis server. PlatformIO CLI for the Phase 2 ESP32 firmware build.</p>
+</section>
+
+<!-- TIMELINE -->
+<section id="timeline">
+    <h2>Timeline &amp; Milestones</h2>
+    <p>Solo developer, 10–15 hours per week. Phase 1 is a complete exhibitable installation on its own.</p>
+
+    <div class="milestones">
+        <div class="milestone">
+            <div class="m-tag">M1</div>
+            <div class="m-label">Week 2</div>
+            <div class="m-desc">Detection calibrated — persistence threshold tuned, direction colours verified, per-blob hue stable.</div>
+        </div>
+        <div class="milestone">
+            <div class="m-tag">M2</div>
+            <div class="m-label">Week 4</div>
+            <div class="m-desc">Audio from lamp motion — SuperCollider booted, direction-shaped attack/release audible, zombie-pool log lines on turning events.</div>
+        </div>
+        <div class="milestone">
+            <div class="m-tag">M3</div>
+            <div class="m-label">Week 6</div>
+            <div class="m-desc">Phase 1 exhibition-ready — macOS LaunchAgents, auto-restart verified, 8-hour overnight unattended test passed.</div>
+        </div>
+        <div class="milestone">
+            <div class="m-tag">M4</div>
+            <div class="m-label">Week 9</div>
+            <div class="m-desc">Three-camera + ESP32 operational — Cameras B and C wired, ESP32 firmware flashed, LED ring installed.</div>
+        </div>
+        <div class="milestone">
+            <div class="m-tag">M5</div>
+            <div class="m-label">Week 12</div>
+            <div class="m-desc">Full closed-loop system — plinth built, feedback frequencies empirically tuned, 48-hour gallery simulation complete.</div>
+        </div>
+        <div class="milestone">
+            <div class="m-tag">M6</div>
+            <div class="m-label">Week 13+</div>
+            <div class="m-desc">Exhibition-ready — artist statement, technical overview, process video, audio recording submitted.</div>
+        </div>
+    </div>
+</section>
+
+<!-- PRIOR ART -->
+<section id="prior-art">
+    <h2>Novelty</h2>
+    <p>To the best of the author's knowledge, this is the first work to combine: (1) a physical lava lamp as live input, (2) H0 persistent homology for topological blob significance filtering, (3) flow-advected mask identity with Wasserstein topological matching, (4) physics-informed buoyancy Kalman with directional priors, (5) birth topology fingerprinting for re-identification, (6) thermodynamic hue as a phase indicator driving musical parameters, (7) a zombie voice pool preserving sonic identity across detection gaps, and (8) a physical acoustic feedback loop in which the music modulates the lamp's wax behaviour.</p>
+</section>
+
+</main>
+
+<footer>
+    <div class="footer-flex">
+        <div>Dynamic Systems Orchestration · Complete Build Guide v3.2</div>
+        <div><a href="https://samleventhal.com">samleventhal.com</a></div>
+    </div>
+</footer>
+
+<script>
+    // Google Sites iframe-safe scrolling
+    function scrollToId(id) {
+        const el = document.getElementById(id);
+        if (el) el.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    }
+</script>
+
+</body>
+</html>
