@@ -1,0 +1,835 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover" />
+<title>GNAR ! GNAR ! POW ! POW !</title>
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+<link href="https://fonts.googleapis.com/css2?family=Press+Start+2P&family=VT323&display=swap" rel="stylesheet" />
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+
+  :root {
+    --snow:   #f4f8ff;
+    --ice:    #b8e0ff;
+    --sky:    #6ec6ff;
+    --deep:   #0a1628;
+    --night:  #061021;
+    --hot:    #ff3b6b;
+    --warm:   #ffb347;
+    --neon:   #fef445;
+    --shadow: rgba(6, 16, 33, 0.7);
+  }
+
+  html, body {
+    height: 100%;
+    overflow: hidden;
+    background: var(--night);
+    color: var(--snow);
+    font-family: 'VT323', monospace;
+    user-select: none;
+    -webkit-user-select: none;
+    -webkit-tap-highlight-color: transparent;
+    touch-action: none;
+    overscroll-behavior: none;
+  }
+
+  #game {
+    position: fixed;
+    inset: 0;
+    background:
+      radial-gradient(ellipse at 50% -10%, #2a4f8a 0%, #1a3055 25%, var(--deep) 60%, var(--night) 100%);
+    overflow: hidden;
+  }
+
+  /* ambient falling snow */
+  #snow-bg { position: absolute; inset: 0; pointer-events: none; z-index: 1; }
+  .bg-flake {
+    position: absolute;
+    color: rgba(255, 255, 255, 0.55);
+    animation: fall linear infinite;
+  }
+  @keyframes fall {
+    from { transform: translateY(-30px); }
+    to   { transform: translateY(110vh); }
+  }
+
+  /* mountain silhouettes */
+  #mountains {
+    position: absolute;
+    bottom: 0; left: -20px; right: -20px;
+    height: 35vh;
+    pointer-events: none;
+    z-index: 2;
+    background: linear-gradient(180deg, transparent 30%, rgba(6, 16, 33, 0.4) 80%);
+  }
+  #mountains::before {
+    content: '🏔🏔🏔🏔🏔🏔🏔🏔🏔';
+    position: absolute;
+    bottom: 8vh;
+    left: -40px; right: -40px;
+    font-size: clamp(60px, 14vw, 130px);
+    letter-spacing: -10px;
+    opacity: 0.18;
+    filter: blur(0.5px);
+    white-space: nowrap;
+  }
+  #mountains::after {
+    content: '🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲';
+    position: absolute;
+    bottom: 0;
+    left: -30px; right: -30px;
+    font-size: clamp(20px, 5vw, 40px);
+    letter-spacing: -2px;
+    opacity: 0.22;
+    white-space: nowrap;
+  }
+
+  /* HUD */
+  #hud {
+    position: absolute;
+    top: 0; left: 0; right: 0;
+    padding: 14px 18px calc(14px + env(safe-area-inset-top, 0)) 18px;
+    padding-top: calc(14px + env(safe-area-inset-top, 0));
+    display: flex;
+    justify-content: space-between;
+    align-items: flex-start;
+    z-index: 100;
+    pointer-events: none;
+    font-family: 'Press Start 2P', monospace;
+  }
+  .hud-block { line-height: 1.6; }
+  .hud-block.right { text-align: right; }
+  .hud-label {
+    color: var(--ice);
+    font-size: 9px;
+    letter-spacing: 1px;
+    text-shadow: 2px 2px 0 var(--shadow);
+  }
+  .hud-value {
+    color: var(--neon);
+    font-size: 16px;
+    text-shadow: 2px 2px 0 var(--shadow), 0 0 12px rgba(254, 244, 69, 0.6);
+  }
+  .hud-level { color: var(--snow); font-size: 11px; margin-top: 4px; text-shadow: 2px 2px 0 var(--shadow); }
+
+  /* player */
+  #player {
+    position: absolute;
+    bottom: 13%;
+    left: 50%;
+    font-size: clamp(38px, 9vw, 56px);
+    z-index: 50;
+    transform: translateX(-50%);
+    filter: drop-shadow(0 0 14px var(--warm)) drop-shadow(0 6px 0 var(--shadow));
+    transition: filter 0.15s;
+    will-change: transform, left;
+  }
+  #player.hidden { display: none; }
+  #player::after {
+    content: '';
+    position: absolute;
+    left: 50%;
+    bottom: -8px;
+    width: 70%;
+    height: 6px;
+    background: radial-gradient(ellipse, rgba(255, 255, 255, 0.6), transparent 70%);
+    transform: translateX(-50%);
+    filter: blur(2px);
+  }
+
+  /* obstacles */
+  .obstacle {
+    position: absolute;
+    z-index: 40;
+    pointer-events: none;
+    will-change: transform, top;
+  }
+  .obstacle.flake {
+    font-size: clamp(18px, 3.5vw, 28px);
+    color: var(--snow);
+    text-shadow: 0 0 10px var(--ice), 0 0 4px #fff;
+    filter: drop-shadow(0 0 6px var(--ice));
+  }
+  .obstacle.skier, .obstacle.boarder {
+    font-size: clamp(34px, 7vw, 46px);
+    filter: drop-shadow(0 0 8px var(--hot)) drop-shadow(0 3px 0 var(--shadow));
+  }
+
+  /* touch zones */
+  .touch-zone {
+    position: absolute;
+    top: 0; bottom: 0;
+    width: 50%;
+    z-index: 60;
+  }
+  .touch-zone.left  { left: 0; }
+  .touch-zone.right { right: 0; }
+
+  .touch-zone .arrow {
+    position: absolute;
+    bottom: 6%;
+    font-family: 'Press Start 2P', monospace;
+    color: var(--ice);
+    opacity: 0.18;
+    font-size: clamp(28px, 8vw, 50px);
+    text-shadow: 2px 2px 0 var(--shadow);
+    pointer-events: none;
+    transition: opacity 0.1s, transform 0.1s;
+  }
+  .touch-zone.left .arrow  { left: 8%; }
+  .touch-zone.right .arrow { right: 8%; }
+  .touch-zone.active .arrow { opacity: 0.85; transform: scale(1.15); }
+
+  /* screens */
+  .screen {
+    position: absolute;
+    inset: 0;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    z-index: 200;
+    padding: 24px;
+    text-align: center;
+    background: radial-gradient(ellipse at center, rgba(10, 22, 40, 0.78) 0%, rgba(6, 16, 33, 0.96) 100%);
+    cursor: pointer;
+  }
+  .screen.hidden { display: none; }
+
+  .title-main {
+    font-family: 'Press Start 2P', monospace;
+    font-size: clamp(26px, 8vw, 64px);
+    line-height: 1.35;
+    color: var(--snow);
+    text-shadow:
+      4px 4px 0 var(--hot),
+      8px 8px 0 var(--shadow),
+      0 0 40px rgba(110, 198, 255, 0.5);
+    margin-bottom: 18px;
+    animation: titleSway 2.2s ease-in-out infinite;
+  }
+  @keyframes titleSway {
+    0%, 100% { transform: scale(1) rotate(-1.5deg); }
+    50%      { transform: scale(1.04) rotate(1.5deg); }
+  }
+
+  .subtitle {
+    font-family: 'Press Start 2P', monospace;
+    font-size: clamp(15px, 4.2vw, 30px);
+    color: var(--neon);
+    line-height: 1.6;
+    text-shadow: 3px 3px 0 var(--shadow), 0 0 20px rgba(254, 244, 69, 0.55);
+    margin: 16px 0;
+  }
+
+  .player-preview {
+    font-size: clamp(60px, 14vw, 100px);
+    margin: 14px 0;
+    filter: drop-shadow(0 0 24px var(--warm));
+    animation: shred 0.5s ease-in-out infinite alternate;
+  }
+  @keyframes shred {
+    from { transform: translateX(-12px) rotate(-6deg); }
+    to   { transform: translateX(12px)  rotate(6deg); }
+  }
+
+  .tap-prompt {
+    font-family: 'VT323', monospace;
+    font-size: clamp(20px, 4.5vw, 28px);
+    color: var(--ice);
+    margin-top: 28px;
+    letter-spacing: 3px;
+    animation: blink 1s steps(2) infinite;
+  }
+  @keyframes blink { 50% { opacity: 0.25; } }
+
+  .hint {
+    font-family: 'VT323', monospace;
+    font-size: clamp(16px, 3.2vw, 22px);
+    color: rgba(184, 224, 255, 0.7);
+    margin-top: 10px;
+    letter-spacing: 1px;
+  }
+
+  .level-tag {
+    font-family: 'Press Start 2P', monospace;
+    font-size: clamp(20px, 6vw, 44px);
+    color: var(--snow);
+    line-height: 1.6;
+    text-shadow: 4px 4px 0 var(--hot), 0 0 30px rgba(110, 198, 255, 0.7);
+    animation: levelSlide 0.55s cubic-bezier(.2,1.5,.3,1) both;
+  }
+  @keyframes levelSlide {
+    from { transform: translateX(-110vw) skewX(-12deg); opacity: 0; }
+    to   { transform: translateX(0) skewX(0deg); opacity: 1; }
+  }
+
+  .praise {
+    font-family: 'Press Start 2P', monospace;
+    font-size: clamp(22px, 7vw, 56px);
+    color: var(--neon);
+    line-height: 1.5;
+    text-shadow: 4px 4px 0 var(--hot), 0 0 30px rgba(254, 244, 69, 0.7);
+    animation: praisePop 0.55s cubic-bezier(.2,1.7,.3,1) both;
+  }
+  @keyframes praisePop {
+    0%   { transform: scale(0) rotate(-15deg); opacity: 0; }
+    60%  { transform: scale(1.18) rotate(4deg); }
+    100% { transform: scale(1) rotate(-2deg); opacity: 1; }
+  }
+
+  /* face plant */
+  #faceplant {
+    position: absolute;
+    inset: 0;
+    z-index: 300;
+    background: var(--hot);
+    overflow: hidden;
+    animation: shake 0.13s linear infinite;
+  }
+  #faceplant.hidden { display: none; }
+  @keyframes shake {
+    0%   { transform: translate(0, 0); }
+    25%  { transform: translate(-5px, 3px); }
+    50%  { transform: translate(5px, -3px); }
+    75%  { transform: translate(-3px, 5px); }
+    100% { transform: translate(3px, -5px); }
+  }
+  .fp-text {
+    position: absolute;
+    font-family: 'Press Start 2P', monospace;
+    white-space: nowrap;
+    text-shadow: 4px 4px 0 #000;
+    pointer-events: none;
+    font-weight: 400;
+  }
+  .fp-center {
+    position: absolute;
+    top: 50%; left: 50%;
+    transform: translate(-50%, -50%);
+    font-family: 'Press Start 2P', monospace;
+    font-size: clamp(28px, 9vw, 72px);
+    color: #fff;
+    text-shadow: 6px 6px 0 #000, 0 0 30px rgba(0, 0, 0, 0.6);
+    text-align: center;
+    line-height: 1.4;
+    z-index: 5;
+    animation: centerPulse 0.5s ease-in-out infinite alternate;
+  }
+  @keyframes centerPulse {
+    from { transform: translate(-50%, -50%) scale(1) rotate(-3deg); }
+    to   { transform: translate(-50%, -50%) scale(1.08) rotate(3deg); }
+  }
+
+  #fp-controls {
+    position: absolute;
+    bottom: 8%;
+    left: 5%; right: 5%;
+    z-index: 310;
+    text-align: center;
+    background: var(--night);
+    padding: 18px 16px;
+    border-top: 4px solid var(--neon);
+    border-bottom: 4px solid var(--neon);
+    box-shadow: 0 0 0 4px var(--shadow);
+  }
+  #fp-controls.hidden { display: none; }
+  #fp-controls .subtitle { margin: 4px 0; font-size: clamp(13px, 3.6vw, 22px); }
+  #fp-controls .hud-value { font-size: clamp(18px, 5vw, 28px); margin: 6px 0; }
+
+  /* impossible warning */
+  #game.impossible-mode #player {
+    filter: drop-shadow(0 0 18px var(--hot)) drop-shadow(0 0 6px #fff);
+    animation: dangerPulse 0.25s ease-in-out infinite alternate;
+  }
+  @keyframes dangerPulse {
+    from { transform: translateX(-50%) scale(1); }
+    to   { transform: translateX(-50%) scale(1.08); }
+  }
+  #game.impossible-mode::before {
+    content: '';
+    position: absolute;
+    inset: 0;
+    pointer-events: none;
+    z-index: 95;
+    background: radial-gradient(ellipse at center, transparent 40%, rgba(255, 59, 107, 0.25) 100%);
+    animation: edgeFlash 0.35s linear infinite alternate;
+  }
+  @keyframes edgeFlash {
+    from { opacity: 0.4; }
+    to   { opacity: 1; }
+  }
+</style>
+</head>
+<body>
+<div id="game">
+  <div id="snow-bg"></div>
+  <div id="mountains"></div>
+
+  <!-- HUD -->
+  <div id="hud" class="hidden">
+    <div class="hud-block">
+      <div class="hud-label">RIDER</div>
+      <div class="hud-value">BIG HUNK</div>
+      <div class="hud-level" id="hud-level">BUNNY HILL</div>
+    </div>
+    <div class="hud-block right">
+      <div class="hud-label">POW</div>
+      <div class="hud-value" id="score">0</div>
+    </div>
+  </div>
+
+  <!-- Player -->
+  <div id="player" class="hidden">🏂</div>
+
+  <!-- Touch zones -->
+  <div class="touch-zone left"  id="touch-left"><div class="arrow">◀</div></div>
+  <div class="touch-zone right" id="touch-right"><div class="arrow">▶</div></div>
+
+  <!-- TITLE -->
+  <div class="screen" id="screen-title">
+    <div class="title-main">GNAR !<br>GNAR !<br>POW !<br>POW !</div>
+    <div class="player-preview">🏂</div>
+    <div class="tap-prompt">TAP / PRESS ANY KEY</div>
+  </div>
+
+  <!-- READY -->
+  <div class="screen hidden" id="screen-ready">
+    <div class="subtitle">OKAY, BIG HUNK,<br>YOU READY TO SHRED ?!</div>
+    <div class="player-preview" style="font-size: clamp(48px, 11vw, 80px);">🤙</div>
+    <div class="hint">← →   /   A D   /   TAP SIDES</div>
+    <div class="tap-prompt">TAP TO DROP IN</div>
+  </div>
+
+  <!-- LEVEL INTRO -->
+  <div class="screen hidden" id="screen-level">
+    <div class="level-tag" id="level-text">LEVEL 0:<br>BUNNY HILL</div>
+  </div>
+
+  <!-- PRAISE -->
+  <div class="screen hidden" id="screen-praise">
+    <div class="praise" id="praise-text">NICE,<br>BIG HUNK !</div>
+  </div>
+
+  <!-- FACE PLANT -->
+  <div id="faceplant" class="hidden"></div>
+  <div id="fp-controls" class="hidden">
+    <div class="subtitle">RUN ENDED</div>
+    <div class="hud-value">FINAL POW: <span id="final-score">0</span></div>
+    <div class="tap-prompt">TAP TO RESPAWN</div>
+  </div>
+</div>
+
+<script>
+  const GAME      = document.getElementById('game');
+  const PLAYER    = document.getElementById('player');
+  const HUD       = document.getElementById('hud');
+  const SCORE_EL  = document.getElementById('score');
+  const HUD_LEVEL = document.getElementById('hud-level');
+  const FINAL     = document.getElementById('final-score');
+  const TOUCH_L   = document.getElementById('touch-left');
+  const TOUCH_R   = document.getElementById('touch-right');
+
+  const SCREEN = {
+    title:   document.getElementById('screen-title'),
+    ready:   document.getElementById('screen-ready'),
+    level:   document.getElementById('screen-level'),
+    praise:  document.getElementById('screen-praise'),
+    fp:      document.getElementById('faceplant'),
+    fpCtrl:  document.getElementById('fp-controls'),
+  };
+
+  // Levels: progressively faster spawn rates and higher fall speeds
+  const LEVELS = [
+    { name: 'BUNNY HILL',   tag: 'LEVEL 0:<br>BUNNY HILL',    flakeRate: 1100, dangerRate: 2400, flakeSpd: 0.55, dangerSpd: 0.65 },
+    { name: 'GREEN',        tag: 'LEVEL 1:<br>GREEN',         flakeRate:  950, dangerRate: 1800, flakeSpd: 0.70, dangerSpd: 0.85 },
+    { name: 'DOUBLE GREEN', tag: 'LEVEL 2:<br>DOUBLE GREEN',  flakeRate:  820, dangerRate: 1450, flakeSpd: 0.85, dangerSpd: 1.00 },
+    { name: 'BLUE',         tag: 'LEVEL 3:<br>BLUE',          flakeRate:  720, dangerRate: 1150, flakeSpd: 1.00, dangerSpd: 1.18 },
+    { name: 'DOUBLE BLUE',  tag: 'LEVEL 4:<br>DOUBLE BLUE',   flakeRate:  640, dangerRate:  950, flakeSpd: 1.15, dangerSpd: 1.35 },
+    { name: 'BLACK',        tag: 'LEVEL 5:<br>BLACK',         flakeRate:  560, dangerRate:  780, flakeSpd: 1.30, dangerSpd: 1.55 },
+    { name: 'DOUBLE BLACK', tag: 'LEVEL 6:<br>DOUBLE BLACK',  flakeRate:  500, dangerRate:  640, flakeSpd: 1.50, dangerSpd: 1.78 },
+  ];
+
+  // Praise messages awarded between levels
+  const PRAISE = {
+     5: 'NICE,<br>BIG HUNK !',
+    10: 'RAD,<br>BIG HUNK !',
+    15: 'SICK<br>BIG HUNK !',
+    20: 'GNARLY,<br>BIG HUNK !',
+    25: 'SHREDDIN&#39; IT<br>BIG HUNK !',
+    30: 'TOTAL<br>HUCKER !',
+  };
+
+  const state = {
+    mode: 'title',
+    score: 0,
+    level: 0,
+    playerX: 50,
+    obstacles: [],
+    keys: { left: false, right: false },
+    lastTime: 0,
+    lastFlake: 0,
+    lastDanger: 0,
+    impossibleAt: 0,
+    impossibleTriggered: false,
+    rafId: null,
+    transitionTimer: null,
+  };
+
+  // ---------- screen management ----------
+  function hideAllScreens() {
+    Object.values(SCREEN).forEach(s => s.classList.add('hidden'));
+  }
+  function clearTransition() {
+    if (state.transitionTimer) { clearTimeout(state.transitionTimer); state.transitionTimer = null; }
+  }
+
+  function setMode(mode) {
+    clearTransition();
+    state.mode = mode;
+    hideAllScreens();
+
+    if (mode === 'title') {
+      SCREEN.title.classList.remove('hidden');
+      HUD.classList.add('hidden');
+      PLAYER.classList.add('hidden');
+      GAME.classList.remove('impossible-mode');
+    }
+    else if (mode === 'ready') {
+      SCREEN.ready.classList.remove('hidden');
+    }
+    else if (mode === 'level') {
+      document.getElementById('level-text').innerHTML = LEVELS[state.level].tag;
+      HUD_LEVEL.textContent = LEVELS[state.level].name;
+      SCREEN.level.classList.remove('hidden');
+      state.transitionTimer = setTimeout(() => {
+        if (state.mode === 'level') startPlaying();
+      }, 1500);
+    }
+    else if (mode === 'playing') {
+      HUD.classList.remove('hidden');
+      PLAYER.classList.remove('hidden');
+    }
+    else if (mode === 'praise') {
+      document.getElementById('praise-text').innerHTML =
+        PRAISE[state.score] || 'RIPPIN&#39; IT !';
+      SCREEN.praise.classList.remove('hidden');
+      state.transitionTimer = setTimeout(() => {
+        if (state.mode === 'praise') {
+          state.level = Math.min(state.level + 1, LEVELS.length - 1);
+          // clear old obstacles between levels for clean transition
+          state.obstacles.forEach(o => o.el.remove());
+          state.obstacles = [];
+          setMode('level');
+        }
+      }, 1300);
+    }
+    else if (mode === 'faceplant') {
+      showFacePlant();
+    }
+  }
+
+  // ---------- gameplay ----------
+  function startPlaying() {
+    setMode('playing');
+    state.lastTime   = performance.now();
+    state.lastFlake  = performance.now();
+    state.lastDanger = performance.now();
+    if (state.rafId) cancelAnimationFrame(state.rafId);
+    state.rafId = requestAnimationFrame(loop);
+  }
+
+  function startNewRun() {
+    // reset everything
+    state.score = 0;
+    state.level = 0;
+    state.playerX = 50;
+    state.obstacles.forEach(o => o.el.remove());
+    state.obstacles = [];
+    state.impossibleAt = 16 + Math.floor(Math.random() * 14); // 16..29 inclusive
+    state.impossibleTriggered = false;
+    GAME.classList.remove('impossible-mode');
+    SCORE_EL.textContent = '0';
+    PLAYER.style.left = '50%';
+    PLAYER.style.transform = 'translateX(-50%)';
+    setMode('level');
+  }
+
+  function spawnObstacle(kind) {
+    const el = document.createElement('div');
+    el.className = 'obstacle ' + kind;
+
+    let emoji;
+    if (kind === 'flake')      emoji = ['❄️', '❅', '❆'][Math.floor(Math.random() * 3)];
+    else if (kind === 'skier') emoji = '⛷️';
+    else                       emoji = '🏂';
+
+    el.textContent = emoji;
+    const x = 4 + Math.random() * 92;
+    el.style.left = x + '%';
+    el.style.top  = '-8%';
+    GAME.appendChild(el);
+
+    state.obstacles.push({
+      el,
+      kind,
+      x,
+      y: -8,
+      drift:  kind === 'flake' ? (Math.random() - 0.5) * 0.35 : 0,
+      hbW:    kind === 'flake' ? 3.5 : 5.5,
+      hbH:    kind === 'flake' ? 4   : 6,
+      counted: false,
+    });
+  }
+
+  function spawnImpossibleWall(yOffset = 0) {
+    // a row of skiers/snowboarders covering the full width — no gap to slip through
+    for (let x = 4; x <= 96; x += 7.5) {
+      const el = document.createElement('div');
+      const isSkier = Math.random() < 0.5;
+      el.className = 'obstacle ' + (isSkier ? 'skier' : 'boarder');
+      el.textContent = isSkier ? '⛷️' : '🏂';
+      el.style.left = x + '%';
+      el.style.top  = (-8 - yOffset) + '%';
+      GAME.appendChild(el);
+      state.obstacles.push({
+        el,
+        kind: isSkier ? 'skier' : 'boarder',
+        x,
+        y: -8 - yOffset,
+        drift: 0,
+        hbW: 5.5,
+        hbH: 6,
+        counted: false,
+      });
+    }
+  }
+
+  function loop(time) {
+    if (state.mode !== 'playing') { state.rafId = null; return; }
+
+    const dt = Math.min((time - state.lastTime) / 16.67, 3); // normalized to 60fps frames
+    state.lastTime = time;
+
+    // player movement + lean
+    const moveSpd = 1.4 * dt;
+    let lean = 0;
+    if (state.keys.left)  { state.playerX = Math.max(5,  state.playerX - moveSpd); lean = -1; }
+    if (state.keys.right) { state.playerX = Math.min(95, state.playerX + moveSpd); lean =  1; }
+    PLAYER.style.left = state.playerX + '%';
+    PLAYER.style.transform = `translateX(-50%) rotate(${lean * 10}deg)`;
+
+    const lvl = LEVELS[state.level];
+
+    // impossible mode trigger
+    if (!state.impossibleTriggered &&
+        state.score >= state.impossibleAt &&
+        state.score < 35) {
+      state.impossibleTriggered = true;
+      GAME.classList.add('impossible-mode');
+      // walls of dangers from the top — unavoidable
+      spawnImpossibleWall(0);
+      setTimeout(() => { if (state.mode === 'playing') spawnImpossibleWall(8);  }, 250);
+      setTimeout(() => { if (state.mode === 'playing') spawnImpossibleWall(16); }, 500);
+    }
+
+    // spawning
+    if (!state.impossibleTriggered) {
+      if (time - state.lastFlake > lvl.flakeRate * (0.7 + Math.random() * 0.6)) {
+        spawnObstacle('flake');
+        state.lastFlake = time;
+      }
+      if (time - state.lastDanger > lvl.dangerRate * (0.7 + Math.random() * 0.6)) {
+        spawnObstacle(Math.random() < 0.5 ? 'skier' : 'boarder');
+        state.lastDanger = time;
+      }
+    } else {
+      // post-impossible: keep raining dangers so player can't stall
+      if (time - state.lastDanger > 180) {
+        spawnObstacle(Math.random() < 0.5 ? 'skier' : 'boarder');
+        state.lastDanger = time;
+      }
+    }
+
+    // update obstacles
+    const playerY     = 87;   // approx top of player in % from top
+    const playerHbW   = 4;
+    const playerHbH   = 5;
+
+    for (let i = state.obstacles.length - 1; i >= 0; i--) {
+      const o = state.obstacles[i];
+      const spd = (o.kind === 'flake' ? lvl.flakeSpd : lvl.dangerSpd);
+      o.y += spd * dt;
+      o.x += o.drift * dt;
+      if (o.x < 2)  o.x = 2;
+      if (o.x > 98) o.x = 98;
+      o.el.style.top  = o.y + '%';
+      o.el.style.left = o.x + '%';
+
+      // off the bottom
+      if (o.y > 110) {
+        if (o.kind === 'flake' && !o.counted) addScore();
+        o.el.remove();
+        state.obstacles.splice(i, 1);
+        continue;
+      }
+
+      // collision (AABB-ish in % space)
+      if (Math.abs(o.y - playerY) < playerHbH + o.hbH &&
+          Math.abs(o.x - state.playerX) < playerHbW + o.hbW) {
+        if (o.kind === 'flake') {
+          // flake "caught" — doesn't end the run, but no point awarded for this one
+          o.el.remove();
+          state.obstacles.splice(i, 1);
+        } else {
+          // skier or boarder = wipeout
+          gameOver();
+          return;
+        }
+      }
+    }
+
+    state.rafId = requestAnimationFrame(loop);
+  }
+
+  function addScore() {
+    state.score++;
+    SCORE_EL.textContent = state.score;
+    // praise + level up every 5 dodged flakes (until last level)
+    if (state.score % 5 === 0 && state.level < LEVELS.length - 1) {
+      setMode('praise');
+    }
+  }
+
+  function gameOver() {
+    setMode('faceplant');
+  }
+
+  // ---------- face plant screen ----------
+  function showFacePlant() {
+    HUD.classList.add('hidden');
+    PLAYER.classList.add('hidden');
+    GAME.classList.remove('impossible-mode');
+    state.obstacles.forEach(o => o.el.remove());
+    state.obstacles = [];
+
+    const fp = SCREEN.fp;
+    fp.innerHTML = '';
+
+    // chaotic FACE PLANT! tile fill
+    const count = 70;
+    const palette = ['#ffffff', '#fef445', '#ffb347', '#0a1628'];
+    for (let i = 0; i < count; i++) {
+      const div = document.createElement('div');
+      div.className = 'fp-text';
+      div.textContent = 'FACE PLANT !';
+      div.style.left = (Math.random() * 95 - 5) + '%';
+      div.style.top  = (Math.random() * 100) + '%';
+      const sz = 10 + Math.random() * 26;
+      div.style.fontSize = sz + 'px';
+      div.style.transform = `rotate(${(Math.random() - 0.5) * 50}deg)`;
+      div.style.color = palette[Math.floor(Math.random() * palette.length)];
+      div.style.opacity = (0.65 + Math.random() * 0.35).toFixed(2);
+      fp.appendChild(div);
+    }
+
+    // huge centered text
+    const center = document.createElement('div');
+    center.className = 'fp-center';
+    center.innerHTML = 'FACE<br>PLANT&nbsp;!';
+    fp.appendChild(center);
+
+    fp.classList.remove('hidden');
+    FINAL.textContent = state.score;
+
+    state.transitionTimer = setTimeout(() => {
+      SCREEN.fpCtrl.classList.remove('hidden');
+    }, 1200);
+  }
+
+  // ---------- input ----------
+  document.addEventListener('keydown', (e) => {
+    if (state.mode === 'playing') {
+      if (e.key === 'ArrowLeft'  || e.key === 'a' || e.key === 'A') state.keys.left  = true;
+      if (e.key === 'ArrowRight' || e.key === 'd' || e.key === 'D') state.keys.right = true;
+    } else if (state.mode === 'title' || state.mode === 'ready') {
+      handleAdvance();
+    } else if (state.mode === 'faceplant' && !SCREEN.fpCtrl.classList.contains('hidden')) {
+      handleAdvance();
+    }
+    if (['ArrowLeft', 'ArrowRight', ' ', 'Spacebar'].includes(e.key)) e.preventDefault();
+  }, { passive: false });
+
+  document.addEventListener('keyup', (e) => {
+    if (e.key === 'ArrowLeft'  || e.key === 'a' || e.key === 'A') state.keys.left  = false;
+    if (e.key === 'ArrowRight' || e.key === 'd' || e.key === 'D') state.keys.right = false;
+  });
+
+  function bindZone(el, side) {
+    const press = (e) => {
+      if (state.mode !== 'playing') return;
+      e.preventDefault();
+      state.keys[side] = true;
+      el.classList.add('active');
+    };
+    const release = (e) => {
+      e && e.preventDefault && e.preventDefault();
+      state.keys[side] = false;
+      el.classList.remove('active');
+    };
+    el.addEventListener('touchstart',  press,   { passive: false });
+    el.addEventListener('touchend',    release, { passive: false });
+    el.addEventListener('touchcancel', release, { passive: false });
+    el.addEventListener('mousedown',   press);
+    el.addEventListener('mouseup',     release);
+    el.addEventListener('mouseleave',  release);
+  }
+  bindZone(TOUCH_L, 'left');
+  bindZone(TOUCH_R, 'right');
+
+  function handleAdvance() {
+    if (state.mode === 'title') {
+      setMode('ready');
+    } else if (state.mode === 'ready') {
+      startNewRun();
+    } else if (state.mode === 'faceplant') {
+      if (!SCREEN.fpCtrl.classList.contains('hidden')) {
+        SCREEN.fpCtrl.classList.add('hidden');
+        SCREEN.fp.classList.add('hidden');
+        startNewRun();
+      }
+    }
+  }
+
+  ['screen-title', 'screen-ready'].forEach(id => {
+    const el = document.getElementById(id);
+    el.addEventListener('click', handleAdvance);
+    el.addEventListener('touchstart', (e) => { e.preventDefault(); handleAdvance(); }, { passive: false });
+  });
+  SCREEN.fpCtrl.addEventListener('click', handleAdvance);
+  SCREEN.fpCtrl.addEventListener('touchstart', (e) => { e.preventDefault(); handleAdvance(); }, { passive: false });
+
+  // ---------- ambient bg snow ----------
+  (function makeBgSnow() {
+    const bg = document.getElementById('snow-bg');
+    const glyphs = ['❄', '·', '✦', '·', '❅', '⋆'];
+    for (let i = 0; i < 55; i++) {
+      const f = document.createElement('div');
+      f.className = 'bg-flake';
+      f.textContent = glyphs[Math.floor(Math.random() * glyphs.length)];
+      f.style.left = (Math.random() * 100) + '%';
+      f.style.fontSize = (8 + Math.random() * 14) + 'px';
+      f.style.animationDuration = (5 + Math.random() * 12) + 's';
+      f.style.animationDelay = (Math.random() * 12) + 's';
+      f.style.opacity = (0.25 + Math.random() * 0.45).toFixed(2);
+      bg.appendChild(f);
+    }
+  })();
+
+  // boot
+  setMode('title');
+</script>
+</body>
+</html>
