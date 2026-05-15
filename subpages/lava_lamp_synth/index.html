@@ -3,17 +3,17 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <meta name="description" content="Dynamical Systems Orchestration — a generative music installation driven by a lava lamp. Real-time topological data analysis, flow-advected tracking, and physics-informed sound synthesis by Samuel D. Leventhal.">
-    <meta name="keywords" content="Samuel Leventhal, generative music, lava lamp, persistent homology, topological data analysis, SuperCollider, computer vision, GUDHI">
+    <meta name="description" content="Dynamical Systems Orchestration v4.0 (MPE Edition) — a blob-driven MPE polysynth controlled by camera and keyboard. 16 voice slots, bidirectional blob↔voice binding, persistent homology tracking, and a closed player–lamp duet. By Samuel D. Leventhal.">
+    <meta name="keywords" content="Samuel Leventhal, generative music, lava lamp, persistent homology, topological data analysis, SuperCollider, computer vision, GUDHI, MPE, polysynth, wavetable, pygame, voice slot, MIDI Fighter Twister">
     <meta name="author" content="Samuel D. Leventhal">
 
     <!-- Open Graph -->
-    <meta property="og:title" content="Dynamical Systems Orchestration">
-    <meta property="og:description" content="A generative music installation driven by a lava lamp. Persistent homology, flow-advected tracking, and a closed acoustic feedback loop.">
+    <meta property="og:title" content="Dynamical Systems Orchestration · v4.0 (MPE)">
+    <meta property="og:description" content="A blob-driven MPE polysynth controlled by camera and keyboard. 16 voice slots, bidirectional blob↔voice binding, and a closed player–lamp duet.">
     <meta property="og:type" content="article">
     <meta property="og:url" content="https://samleventhal.com/dynamical-systems-orchestration">
 
-    <title>Dynamic Systems Orchestration (Lava Lamp Synth) | Samuel D. Leventhal</title>
+    <title>Dynamical Systems Orchestration v4.0 (MPE) | Samuel D. Leventhal</title>
 
     <!-- Fonts -->
     <link rel="preconnect" href="https://fonts.googleapis.com">
@@ -32,6 +32,13 @@
             --color-border: #d4d2cf;
             --color-code-bg: #2c2a28;
             --color-code-text: #f0efed;
+
+            /* Voice-state colours (matching the OpenCV overlay) */
+            --state-blob: #f0a03c;
+            --state-keyboard: #50e678;
+            --state-hybrid: #ff963c;
+            --state-zombie: #8c8282;
+            --state-idle: #5a5a5a;
 
             --font-display: 'Cormorant Garamond', Georgia, serif;
             --font-body: 'Source Sans 3', -apple-system, BlinkMacSystemFont, sans-serif;
@@ -214,7 +221,7 @@
         nav ul {
             display: flex;
             flex-wrap: wrap;
-            gap: 0.5rem 1.8rem;
+            gap: 0.5rem 1.6rem;
             justify-content: center;
             list-style: none;
             margin: 0 auto;
@@ -425,6 +432,7 @@
         .pipeline .accent { color: #e89a6a; }
         .pipeline .dim { color: #8a857f; }
         .pipeline .zombie { color: #d4a8b0; }
+        .pipeline .v4 { color: #8fc8a4; }
 
         /* Inline code */
         code {
@@ -470,6 +478,7 @@
             border-bottom: 2px solid var(--color-border);
         }
         td.num { font-family: var(--font-mono); font-size: 0.88rem; color: var(--color-text-muted); white-space: nowrap; }
+        td code, th code { font-size: 0.82em; }
 
         /* Milestones */
         .milestones {
@@ -532,7 +541,7 @@
         /* Project media */
         .media-grid {
             display: grid;
-            grid-template-columns: minmax(0, 260px) 1fr;
+            grid-template-columns: 1fr 1fr;
             gap: 1.5rem;
             margin: 1.25rem 0 1.5rem;
             align-items: start;
@@ -544,10 +553,13 @@
             font-style: italic;
             font-size: 0.95rem;
             color: var(--color-text-muted);
+            text-align: center;
         }
         .video-frame {
             position: relative;
             width: 100%;
+            max-width: 280px;
+            margin: 0 auto;
             background: var(--color-code-bg);
             border-radius: 6px;
             overflow: hidden;
@@ -563,23 +575,103 @@
         .video-frame-vertical { aspect-ratio: 9 / 16; }
         .video-frame-wide { aspect-ratio: 16 / 9; }
 
-        .media-image {
-            margin: 0.5rem auto 0;
-            max-width: 600px;
+        /* Guides cards */
+        .guides-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+            gap: 1rem;
+            margin: 1rem 0 1.5rem;
         }
-        .media-image a {
-            display: block;
-            border: 0;
+        .guide-card {
+            display: flex;
+            flex-direction: column;
+            padding: 1.1rem 1.3rem;
+            background: var(--color-bg-alt);
+            border-left: 3px solid var(--color-accent);
+            border-radius: 0 6px 6px 0;
+            transition: background 0.15s ease, transform 0.15s ease;
+        }
+        .guide-card:hover {
+            background: #e8e6e3;
+            transform: translateX(2px);
+            border-bottom: 0;
+        }
+        .guide-card .g-kind {
+            font-family: var(--font-mono);
+            font-size: 0.7rem;
+            text-transform: uppercase;
+            letter-spacing: 0.1em;
+            color: var(--color-accent);
+            margin-bottom: 0.4rem;
+        }
+        .guide-card .g-title {
+            font-family: var(--font-display);
+            font-size: 1.1rem;
+            font-weight: 600;
+            color: var(--color-text);
+            margin-bottom: 0.3rem;
+        }
+        .guide-card .g-desc {
+            font-size: 0.88rem;
+            color: var(--color-text-muted);
+            line-height: 1.45;
+        }
+
+        /* Keyboard controls table & legend */
+        .controls-wrap {
+            display: grid;
+            grid-template-columns: 1fr;
+            gap: 1.25rem;
+        }
+        .control-block {
+            background: var(--color-bg-alt);
             border-radius: 6px;
-            overflow: hidden;
-            box-shadow: 0 2px 8px rgba(0, 0, 0, 0.08);
+            padding: 1.1rem 1.3rem;
         }
-        .media-image a:hover { border-bottom: 0; }
-        .media-image img {
-            width: 100%;
-            height: auto;
-            display: block;
+        .control-block h4 {
+            margin-top: 0;
         }
+        .key {
+            display: inline-block;
+            font-family: var(--font-mono);
+            font-size: 0.78em;
+            font-weight: 500;
+            background: var(--color-bg);
+            border: 1px solid var(--color-border);
+            border-bottom-width: 2px;
+            border-radius: 4px;
+            padding: 0.05rem 0.45rem;
+            margin: 0 0.05rem;
+            color: var(--color-text);
+            white-space: nowrap;
+        }
+        td .key { background: #fff; }
+
+        .state-legend {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(170px, 1fr));
+            gap: 0.6rem;
+            margin: 0.6rem 0 0.2rem;
+        }
+        .state-pill {
+            display: flex;
+            align-items: center;
+            gap: 0.5rem;
+            font-size: 0.88rem;
+        }
+        .state-dot {
+            width: 12px;
+            height: 12px;
+            border-radius: 50%;
+            display: inline-block;
+            flex-shrink: 0;
+            border: 1px solid rgba(0,0,0,0.08);
+        }
+        .state-dot.blob     { background: var(--state-blob); }
+        .state-dot.keyboard { background: var(--state-keyboard); }
+        .state-dot.hybrid   { background: var(--state-hybrid); }
+        .state-dot.zombie   { background: var(--state-zombie); }
+        .state-dot.idle     { background: var(--state-idle); }
 
         /* Responsive */
         @media (max-width: 640px) {
@@ -587,9 +679,9 @@
             .lamp { display: none; }
             .milestone { grid-template-columns: 1fr; gap: 0.2rem; padding-bottom: 1rem; }
             .stage { grid-template-columns: 1fr; gap: 0.3rem; }
-            .pipeline { font-size: 0.66rem; padding: 1rem; }
+            .pipeline { font-size: 0.62rem; padding: 1rem; }
             .media-grid { grid-template-columns: 1fr; }
-            .media-grid .media-item:first-child { max-width: 280px; margin: 0 auto; }
+            .video-frame { max-width: 280px; }
         }
     </style>
 </head>
@@ -599,10 +691,10 @@
 <header class="project-header">
     <div class="header-inner">
         <div class="header-text">
-            <span class="tag">Art × Research · v3.2</span>
-            <h1>Dynamic Systems Orchestration (Lava Lamp Synth)</h1>
-            <!-- <p class="subtitle">A generative music installation driven by a lava lamp</p> -->
-	     <p class="subtitle">Compositions from inherently stochastic elementsevolving topologically and geometrically within a closed-loop system, read as voices in an orchestration to yield unique scores at every instantiation.</p>
+            <span class="tag">Art × Research · v4.0 (MPE)</span>
+            <h1>Dynamical Systems Orchestration</h1>
+	    <p class="subtitle">Compositions from inherently stochastic elements evolving topologically and geometrically within a closed-loop system, read as voices in an orchestration to yield unique scores at every instantiation.</p>
+            <p class="subtitle">A blob-driven MPE polysynth controlled by camera and keyboard — sixteen voice slots shared between a thermodynamic system and a human player.</p>
         </div>
         <div class="lamp" aria-hidden="true">
             <div class="lamp-cap"></div>
@@ -623,10 +715,12 @@
         <li><a onclick="scrollToId('media')">Media</a></li>
         <li><a onclick="scrollToId('methodology')">Methodology</a></li>
         <li><a onclick="scrollToId('architecture')">Architecture</a></li>
+        <li><a onclick="scrollToId('controls')">Controls</a></li>
         <li><a onclick="scrollToId('versions')">Versions</a></li>
         <li><a onclick="scrollToId('deep-dives')">Deep Dives</a></li>
         <li><a onclick="scrollToId('build')">Build</a></li>
         <li><a onclick="scrollToId('timeline')">Timeline</a></li>
+        <li><a onclick="scrollToId('guides')">Guides</a></li>
     </ul>
 </nav>
 
@@ -639,109 +733,96 @@
 
 <p class="lead">Each blob's individual voice and contribution to the total score's orchestration changes depending on the blob's travel — both position and speed — temperature as derived from its coloration, and geometric evolution. Dynamic changes in the closed system of the lava lamp's lifecycle, such as the merging of two or bifurcation of one, correspond to harmonic and dissonant dynamics.</p>
 
+    <p>Dynamical Systems Orchestration (DSO) v4.0 is a generative-but-performable musical instrument. A lava lamp — a physical, analogue, thermodynamic system — is filmed continuously by a single USB camera. Persistent-homology blob detection, flow-advected mask tracking, and a physics-informed Kalman filter give every wax blob a stable identity and a stream of continuous control features. Those features no longer go straight to a synth voice as in earlier versions — instead, they drive a routing matrix on a sixteen-slot polyphonic synthesiser whose other input is a human player at a computer keyboard.</p>
+
+    <p>v4.0 reframes the system as a duet. The voice is the first-class object; the blob is one of several possible drivers of it. A voice slot can be entirely blob-driven (the v3.2 default), entirely keyboard-driven, or in HYBRID — the player sets pitch and timbre, the blob continues to modulate cutoff, resonance, pan, and amplitude. The closed acoustic feedback loop of the v3 plinth has been retired: the loop now closes through the player's ears and hands, not through the lamp.</p>
+
     <div class="meta-strip">
-        <div class="meta-item"><span class="label">Status</span><span class="value">v3.2 · macOS</span></div>
-        <div class="meta-item"><span class="label">Compute</span><span class="value">MacBook Pro + ESP32</span></div>
-        <div class="meta-item"><span class="label">Vision</span><span class="value">OpenCV · GUDHI</span></div>
-        <div class="meta-item"><span class="label">Audio</span><span class="value">SuperCollider · DeepMind 6</span></div>
+        <div class="meta-item"><span class="label">Author</span><span class="value">Samuel D. Leventhal</span></div>
+        <div class="meta-item"><span class="label">Version</span><span class="value">v4.0 · MPE Edition</span></div>
+        <div class="meta-item"><span class="label">Platform</span><span class="value">macOS · M-series</span></div>
+        <div class="meta-item"><span class="label">Voice Pool</span><span class="value">16 slots</span></div>
+        <div class="meta-item"><span class="label">Stack</span><span class="value">OpenCV · GUDHI · SuperCollider · pygame</span></div>
     </div>
 
-    <h3>The central idea</h3>
-    <p>The lava lamp is a dynamical score — a dissipative physical system whose blob lifecycle (birth, death, merge, split, turning) drives compositional events. The novel methodological contribution sits at the intersection of topological data analysis and environmental art: persistent homology quantifies the significance of each wax blob as a contrast-against-surroundings measure, rather than as a threshold on raw intensity or pixel area. A dim but isolated blob (topologically salient) drives a voice; a bright but indistinct region (topologically noisy) does not.</p>
-
-    <h3>Why this architecture exists</h3>
-    <p>Three timescale mismatches make naïve approaches fail. First, blob cycles last 90–180 seconds while MIDI events last milliseconds; bridging requires deliberate multi-layer design, not per-frame mapping. Second, position is the least stable feature of a lava lamp blob — wax moves slowly and gets occluded often — while topological signature (birth, death) and thermodynamic state (hue) are comparatively stable. Third, detection is inherently intermittent: wax can become momentarily transparent, two blobs can pool into one, background subtraction can absorb stationary material.</p>
-
-    <p>v3.0/v3.1 fixed the first two by making the binary mask the identity carrier (advected by optical flow, refined by detection) and by matching in topological feature space rather than pixel space. v3.2 addresses the third by recognizing that turning points are special: wax decelerates, hue flips, MOG2 forgets the now-stationary material, detection drops out, re-identification fails across the thermal transition, and the voice manager stacks release tails as the same physical blob is born and killed repeatedly. The four v3.2 changes each attack a different link in that cascade.</p>
-
-    <blockquote class="pullquote">A compositional approach in which inherently stochastic elements, evolving topologically and geometrically within a closed-loop system, are read as voices in an orchestration, yielding a unique score for every instantiation.</blockquote>
+    <div class="pullquote">A blob rising for ninety seconds should contribute to a ninety-second sweep across the synth state of its bound voice — not 1350 micro-events.</div>
 </section>
 
 <!-- MEDIA -->
 <section id="media">
-    <h2>Project Media</h2>
-    <p>Two short demonstrations of the system in operation, alongside a still from the calibration / initialization stage.</p>
+    <h2>Media</h2>
+    <p>Short captures from the v4.0 development rig — single-camera capture, voice-slot overlay, and the keyboard controller wired through the pygame input window.</p>
 
     <div class="media-grid">
         <figure class="media-item">
             <div class="video-frame video-frame-vertical">
-                <iframe src="https://www.youtube.com/embed/bQYmj0NVmkY?rel=0&amp;modestbranding=1"
-                        title="Lava Lamp Synth — short demo"
-                        loading="lazy"
+                <iframe src="https://www.youtube.com/embed/o8kdpvrTT4A"
+                        title="DSO v4.0 — capture 1"
                         allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share"
+                        referrerpolicy="strict-origin-when-cross-origin"
                         allowfullscreen></iframe>
             </div>
-            <figcaption>Short demo — the system tracking and sounding live blob activity.</figcaption>
+            <figcaption>Voice-slot pipeline in motion</figcaption>
         </figure>
-
         <figure class="media-item">
-            <div class="video-frame video-frame-wide">
-                <iframe src="https://www.youtube.com/embed/Q0msmonSdzM?rel=0&amp;modestbranding=1"
-                        title="Lava Lamp Synth — extended demo"
-                        loading="lazy"
+            <div class="video-frame video-frame-vertical">
+                <iframe src="https://www.youtube.com/embed/eqDC58nI6o4"
+                        title="DSO v4.0 — capture 2"
                         allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share"
+                        referrerpolicy="strict-origin-when-cross-origin"
                         allowfullscreen></iframe>
             </div>
-            <figcaption>Extended walkthrough of detection, tracking, and synthesis.</figcaption>
+            <figcaption>Blob-driven modulation, keyboard-played notes</figcaption>
         </figure>
     </div>
-
-    <figure class="media-item media-image">
-    <a href="media/lavalampinitialization.JPG" target="_blank" rel="noopener">
-        <img src="media/lavalampinitialization.JPG"
-             alt="Lava lamp synth initialization — calibration view of the lamp ROI and wax detection"
-             loading="lazy">
-    </a>
-    <figcaption>Initialization / calibration view — lamp ROI, wax HSV mask, and persistence-thresholded blob detections. <a href="media/lavalampinitialization.JPG" target="_blank" rel="noopener">Open full size</a>.</figcaption>
-    </figure>
 </section>
 
 <!-- METHODOLOGY -->
 <section id="methodology">
-    <h2>Methodology at a Glance</h2>
-    <p>A single camera frame flows through six conceptual stages. All six are active in Phase 1 (single-camera proof of concept); Phase 2 extends each with additional camera feeds and hardware.</p>
+    <h2>Methodology</h2>
+    <p>Six stages run as a continuous loop at roughly 15 fps. Stages 1–4 are the v3.2 tracking pipeline. Stage 5 is new in v4.0: a voice manager that decouples synth voices from blob identities, plus a controller layer that funnels player input through the same architecture.</p>
 
     <div class="stages">
         <div class="stage">
             <div class="stage-num"></div>
             <div>
-                <h3>Calibration</h3>
-                <p>Once at startup. The calibration GUI captures a frozen camera frame and lets the user draw freehand around visible wax blobs plus a rectangle for the lamp ROI. From the drawn pixels it derives HSV range, area bounds, lamp geometry, and thermodynamic hue thresholds. Written to <code>lamp_profile.json</code> and loaded automatically thereafter.</p>
+                <h3>Capture &amp; Calibration</h3>
+                <p>USB camera at 1280×960, 15 fps. A one-time freehand-drawing calibration GUI lets the user paint over typical wax blobs at different temperatures and the lamp's vertical range. From that single pass the system derives HSV wax-colour bounds, MOG2 ROI, lamp top/bottom, and the persistence threshold used downstream. Calibration is stored as <code>lamp_profile.json</code>.</p>
             </div>
         </div>
         <div class="stage">
             <div class="stage-num"></div>
             <div>
-                <h3>Detection</h3>
-                <p>Every frame. MOG2 foreground ∩ wax-colour HSV mask → morphological clean-up → GUDHI CubicalComplex H0 persistence on the masked greyscale → filter by persistence threshold → contour moments → circular mean hue → thermodynamic direction (rising / falling / turning). In v3.2, the MOG2 learning rate is frozen to <code>1e-4</code> after warm-up so stationary wax stays in the foreground.</p>
+                <h3>Topological Detection</h3>
+                <p>Every frame. MOG2 background subtraction (with the v3.2 post-warmup learning rate frozen at <code>1e-4</code>) intersected with the wax-colour HSV mask, morphologically cleaned. The downscaled mask is fed to GUDHI's <code>CubicalComplex</code> for H0 persistence; features above <code>pers_thresh</code> are retained. Each surviving blob is enriched with contour moments (orientation, elongation, Hu invariants) and a wrap-safe circular-mean hue.</p>
             </div>
         </div>
         <div class="stage">
             <div class="stage-num"></div>
             <div>
                 <h3>Flow Advection &amp; Matching</h3>
-                <p>Every frame. Farneback dense optical flow between previous and current greyscale. Every track's mask is inverse-warp remapped forward by the flow. IoU between advected masks and detections determines primary matches; ambiguous overlaps are resolved by Wasserstein-inspired distance in the (birth, death) plane. Unmatched detections are checked against the fingerprint buffer for re-identification. Coasting tracks survive up to <code>MAX_COAST = 20</code> frames.</p>
+                <p>Every frame. Farneback dense optical flow between previous and current greyscale frames. Every track's binary mask is inverse-warp remapped forward by the flow. IoU between advected masks and detections gives primary matches; ambiguous overlaps are resolved by Wasserstein-inspired distance in the (birth, death) persistence plane. Unmatched detections are checked against the fingerprint buffer for re-identification. Coasting tracks survive up to <code>MAX_COAST = 20</code> frames (~1.3 s).</p>
             </div>
         </div>
         <div class="stage">
             <div class="stage-num"></div>
             <div>
                 <h3>Physics Kalman Update</h3>
-                <p>Every frame. Each matched track's 5-state Kalman filter <code>[x, y, vx, vy, ay]</code> is corrected with the detection measurement. Measurement noise adapts based on y-position: near the lamp top/bottom, noise is high (trust physics); mid-column, noise is low (trust detection). The <code>ay</code> state mean-reverts toward zero and is initialised with a directional prior from thermodynamic direction.</p>
+                <p>Every frame. Each matched track's 5-state Kalman filter <code>[x, y, vx, vy, ay]</code> is corrected with the detection measurement. Measurement noise adapts based on y-position: near the lamp top/bottom it is high (trust physics, expect turning); mid-column it is low (trust detection). The <code>ay</code> state mean-reverts toward zero and is initialised with a directional prior from thermodynamic direction.</p>
             </div>
         </div>
         <div class="stage">
             <div class="stage-num"></div>
             <div>
-                <h3>Musical Intelligence</h3>
-                <p>Every frame. The voice manager maintains one <code>blobVoice</code> (filtered saw) and one <code>blobAngle</code> (orientation-panned sine pad) per active blob; a <code>blobStrike</code> transient fires on birth. In v3.2, when a blob disappears, its voice enters a <em>zombie pool</em>: the SC node stays alive at reduced sustain for a 4-second window, during which a nearby compatible blob can resurrect it in place rather than triggering a fresh spawn and release-tail stack.</p>
+                <h3>Binding &amp; Voice Management <span style="color:var(--color-accent); font-family:var(--font-mono); font-size:0.65em; vertical-align:middle;">v4.0</span></h3>
+                <p>Every frame. The <code>BindingManager</code> translates tracker birth/death/merge/split events into <code>VoiceManager</code> lifecycle calls. Blob birth either ties to a pre-armed empty voice, resurrects a zombie, or spawns a fresh <code>BLOB_ONLY</code> slot. Blob death zombifies or detaches depending on whether the player has played the voice recently. Meanwhile the <code>Controller</code> layer polls keyboard events and emits <code>ControllerEvent</code>s: <code>SELECT_SLOT</code>, <code>NOTE_ON</code>, <code>SET_PARAM</code>, <code>CREATE_EMPTY</code>, <code>CLAIM_HYBRID</code>, <code>TIE_BLOB</code>, <code>DETACH</code>. Each voice runs its routing matrix — <code>(source → destination, depth, curve)</code> tuples mapping blob CV features onto synth parameters.</p>
             </div>
         </div>
         <div class="stage">
             <div class="stage-num"></div>
             <div>
-                <h3>Physical Feedback (Phase 2)</h3>
-                <p>A speaker mounted inside the lamp plinth is driven by the ESP32 at frequencies calculated from the current blob state. Acoustic vibrations modulate wax convection, which changes blob behaviour, which the camera films, which changes the music. The loop closes: the lamp is actively shaped by the sound it is generating.</p>
+                <h3>Synthesis &amp; Output</h3>
+                <p>SuperCollider's <code>scsynth</code> runs one <code>\mpeVoice</code> instance per active slot — a wavetable oscillator (4 banks × 4 wavetables) through a state-variable filter (LP/BP/HP crossfade) with full ADSR, addressed by per-voice OSC namespace <code>/voice/&lt;slot&gt;/</code>. <code>\blobAngle</code> (orientation-panned sine pad) and <code>\blobStrike</code> (Klank transient on birth) remain available as auxiliary voices. All output routes through a stereo bus to the audio interface.</p>
             </div>
         </div>
     </div>
@@ -750,17 +831,17 @@
 <!-- ARCHITECTURE -->
 <section id="architecture">
     <h2>Pipeline Architecture</h2>
-    <p>The pipeline runs as a continuous loop at roughly 15 fps. Since v3.0, blob identity is no longer solved as a per-frame assignment problem: it is carried forward by the flow-advected mask and only re-evaluated when a mask overlaps ambiguously with multiple detections or when a new detection appears uncovered by any existing mask. v3.2 adds a second identity layer at the voice manager, where SC synth nodes are preserved across short-lived tracker gaps via the zombie pool.</p>
+    <p>v4.0 adds two identity layers above v3.2's flow-advected tracking: the <strong>voice slot</strong>, which holds full synth state independently of any blob, and the <strong>controller event</strong>, which lets keyboard and (Phase 2) MIDI inputs share the same downstream as blob CV. The result is three nested time-scales of identity: pixel-level blob mask (frame), voice slot (seconds to minutes), and controller binding (a player's set).</p>
 
 <div class="pipeline">USB Camera (1280×960 @ 15 fps)
         │
         ▼
 <span class="accent">blob_detection.py</span>  [BlobDetector · stateful, owns MOG2]
-        MOG2 (history=500, varThreshold=16) <span class="dim">← v3.2: learning_rate=1e-4 post-warmup</span>
+        MOG2 (history=500, varThreshold=16) <span class="dim">← learning_rate=1e-4 post-warmup</span>
         ∩ Wax colour HSV mask (from lamp_profile)
         → Morphological clean (7×7 close, 5×5 open)
         → GUDHI CubicalComplex H0 persistence (downscale=4)
-        → Filter by pers_thresh
+        → Filter by pers_thresh + branch deduplication
         → Contour moments (orientation, elongation, hu[7])
         → Circular mean hue (wrap-safe)
         → Direction: rising | falling | turning
@@ -773,45 +854,129 @@
    D. Wasserstein resolution (topo 0.75, pos 0.15, hue 0.10)
    E. Mask refinement every 5 frames (50/50 blend)
    F. Physics Kalman correct [x, y, vx, vy, ay]
-   G. Coast / retire <span class="dim">← v3.2: max_coast=20</span>
-   H. Fingerprint re-ID <span class="dim">← v3.2: hue weight /60 (was /25)</span>
+   G. Coast / retire <span class="dim">← max_coast=20 (v3.2)</span>
+   H. Fingerprint re-ID <span class="dim">← hue weight /60 (v3.2)</span>
         │
         ▼ [TrackedBlob] + events: birth | death | merge | split
-<span class="accent">voice_manager.py</span>  [VoiceManager]
-   y_norm       → MIDI pentatonic C3–C6
-   persistence  → amplitude (sqrt)
-   birth        → filter cutoff (exp 200–6000 Hz)
-   elongation   → resonance
-   orientation  → blobAngle pan
-   mean_hue     → detune (±0.8%)
-   direction    → attack / release
-<span class="zombie">┌───────────────────────────────────────────────┐
-│  v3.2 ZOMBIE POOL                             │
-│  death → zombify (soft sustain, 4 s window)   │
-│  birth → try_resurrect before _spawn          │
-│  expiry → true gate=0 release                 │
-└───────────────────────────────────────────────┘</span>
+<span class="v4">binding_manager.py</span>  [BindingManager]   <span class="v4">← v4.0</span>
+   on_birth → tie pre-armed voice / resurrect zombie / spawn IDLE
+   on_death → zombify | detach (based on recent-play window)
+   on_merge / on_split → delegate to v3.x VoiceManager handlers
         │
-        ▼ OSC /s_new, /n_set → 127.0.0.1:57110
-<span class="accent">SuperCollider scsynth</span>
-        \blobVoice  (filtered saw, variable ASR envelope)
-        \blobAngle  (orientation-panned sine pad)
-        \blobStrike (Klank transient on birth only)
-        │
-        ▼
-Focusrite Scarlett Solo → Powered speakers
-        │
-        ▼ [Phase 2]
-ESP32 → 4" plinth speaker (acoustic feedback closes the loop)</div>
+        ▼ slot allocation calls
+<span class="v4">voice_manager.py</span>  [VoiceManager · 16-slot pool]   <span class="v4">← v4.0</span>
+   Slot states: IDLE · BLOB_ONLY · KEYBOARD_ONLY · HYBRID · ZOMBIE
+   Each slot:  SynthState (base + smoothed) + routing[] + sc_node
+        ▲                                              │
+        │ ControllerEvent                              │
+        │                                              ▼
+<span class="v4">controller.py</span>  [Controller protocol]   <span class="v4">← v4.0</span>          /voice/&lt;n&gt;/...
+   KeyboardController (pygame, Phase 1)                │
+   MIDIController (mido, Phase 2 stub)                 ▼
+   → NOTE_ON / NOTE_OFF                       <span class="accent">SuperCollider scsynth</span>
+   → SELECT_SLOT                                 \mpeVoice  (wavetable + SVF + ADSR)
+   → SET_PARAM (pitch/wave/env/filt)             \blobAngle (optional)
+   → CREATE_EMPTY / TIE_BLOB / DETACH            \blobStrike (transient on birth)
+   → CLAIM_HYBRID                                      │
+   → LEARN_ARM (Phase 2)                               ▼
+<span class="zombie">┌────────────────────────────────────────┐</span>      Focusrite Scarlett → Speakers
+<span class="zombie">│  ZOMBIE POOL (within VoiceManager)     │</span>
+<span class="zombie">│  BLOB_ONLY ──death──► ZOMBIE           │</span>
+<span class="zombie">│  ZOMBIE ──resurrect──► BLOB_ONLY       │</span>
+<span class="zombie">│  4s window · soft-sustain amp scale    │</span>
+<span class="zombie">└────────────────────────────────────────┘</span></div>
 
-    <h3>Temporal coherence</h3>
-    <p>A blob typically takes 90–180 seconds to rise from base to top. Four mechanisms preserve temporal coherence: (1) flow-advected identity at the tracker — the mask is always present, even when the detector loses the blob momentarily; (2) fingerprint re-identification — lost tracks are recoverable for 15 seconds by topological fingerprint; (3) zombie voice pool — sonic identity persists for a further 4 seconds beyond the tracker gap; (4) lifecycle events as compositional triggers — birth, death, and direction changes drive musical transitions, not per-frame pixel values. A blob rising for 90 seconds produces a single sustained musical gesture, not 1350 micro-events.</p>
+    <h3>Temporal coherence — four layers</h3>
+    <p>A blob typically takes 90–180 seconds to rise from base to top. Identity must persist across that timescale through detection noise, transparency dips, and turning-point storms. Four mechanisms accumulate:</p>
+    <p>(1) <strong>Flow-advected mask</strong> at the tracker — the mask is always present, advected by optical flow even when the detector loses the blob. (2) <strong>Fingerprint re-identification</strong> — lost tracks are recoverable for 15 seconds by topological fingerprint. (3) <strong>Zombie voice pool</strong> — sonic identity persists for a further 4 seconds beyond the tracker gap, with soft-sustain amplitude scaling and centroid + persistence-ratio resurrection matching. (4) <strong>Voice slot lifetime</strong> — the slot itself, independent of any blob, can be authored, edited, and tied to a future blob by the player. Identity exists above the lamp.</p>
+</section>
+
+<!-- CONTROLS -->
+<section id="controls">
+    <h2>Player Controls</h2>
+    <p>v4.0 runs two OS windows simultaneously: an OpenCV video window with overlay graphics, and a pygame window that captures keyboard events. The pygame window must hold keyboard focus for music keys to work; the OpenCV window only receives toggle keys. The keyboard has two coexisting modes — <strong>PERFORMANCE</strong> (play notes on the selected slot) and <strong>EDIT</strong> (scroll the synth parameter tree). <span class="key">TAB</span> toggles between them.</p>
+
+    <div class="controls-wrap">
+
+        <div class="control-block">
+            <h4>Slot selection (both modes)</h4>
+            <p style="font-size:0.95rem; margin-bottom:0.6rem;">The number row maps to the first ten of the sixteen voice slots. Selection happens immediately on key press; the selected slot gets a thicker ring in the video overlay and a row highlight in the side HUD. Slots 10–15 are reachable today via an external MIDI controller (Phase 2) or programmatically.</p>
+            <p style="font-family:var(--font-mono); font-size:0.82rem;">
+                <span class="key">1</span><span class="key">2</span><span class="key">3</span><span class="key">4</span><span class="key">5</span><span class="key">6</span><span class="key">7</span><span class="key">8</span><span class="key">9</span><span class="key">0</span>
+                &nbsp;→&nbsp; S0&nbsp;S1&nbsp;S2&nbsp;S3&nbsp;S4&nbsp;S5&nbsp;S6&nbsp;S7&nbsp;S8&nbsp;S9
+            </p>
+        </div>
+
+        <div class="control-block">
+            <h4>Performance mode</h4>
+            <p style="font-size:0.95rem; margin-bottom:0.6rem;">Plays MIDI notes on the currently selected slot. <code>KEYBOARD_ONLY</code> and <code>HYBRID</code> slots respond to notes; <code>BLOB_ONLY</code> slots ignore notes (use <span class="key">B</span> in EDIT mode to claim them as HYBRID first). The lower QWERTY row covers one chromatic octave (<span class="key">Z</span> = C4 by default); the upper row covers the next octave up. <span class="key">[</span> / <span class="key">]</span> shift octave. <span class="key">SPACE</span> is all-notes-off (panic).</p>
+            <table>
+                <tbody>
+                    <tr><td style="white-space:nowrap;"><span class="key">Z</span> <span class="key">X</span> <span class="key">C</span> <span class="key">V</span> <span class="key">B</span> <span class="key">N</span> <span class="key">M</span> <span class="key">,</span> <span class="key">.</span></td><td>Lower octave white keys (C, D, E, F, G, A, B, C↑, D↑)</td></tr>
+                    <tr><td style="white-space:nowrap;"><span class="key">S</span> <span class="key">D</span> <span class="key">G</span> <span class="key">H</span> <span class="key">J</span> <span class="key">L</span></td><td>Lower octave sharps (C♯, D♯, F♯, G♯, A♯, C♯↑)</td></tr>
+                    <tr><td style="white-space:nowrap;"><span class="key">Q</span> <span class="key">W</span> <span class="key">E</span> <span class="key">R</span> <span class="key">T</span> <span class="key">Y</span> <span class="key">U</span> <span class="key">I</span> <span class="key">O</span> <span class="key">P</span></td><td>Upper octave white keys</td></tr>
+                </tbody>
+            </table>
+        </div>
+
+        <div class="control-block">
+            <h4>Edit mode — parameter families &amp; binding</h4>
+            <p style="font-size:0.95rem; margin-bottom:0.6rem;">QWERTY keys select which parameter family is exposed for editing on the selected slot. Arrow keys then walk through individual parameters and adjust them; <span class="key">-</span> / <span class="key">=</span> are coarse (10×) versions of <span class="key">↓</span> / <span class="key">↑</span>.</p>
+            <table>
+                <thead><tr><th>Key</th><th>Action</th></tr></thead>
+                <tbody>
+                    <tr><td><span class="key">P</span></td><td>Pitch family — <code>base_note</code>, <code>bend</code>, <code>scale_id</code>, <code>chord_id</code></td></tr>
+                    <tr><td><span class="key">W</span></td><td>Wave family — <code>wave_pos</code>, <code>wave_bank</code> (4 banks × 4 wavetables)</td></tr>
+                    <tr><td><span class="key">E</span></td><td>Envelope family — <code>attack</code>, <code>decay</code>, <code>sustain</code>, <code>release</code></td></tr>
+                    <tr><td><span class="key">F</span></td><td>Filter family — <code>cutoff</code>, <code>res</code>, <code>fmode</code> (0=LP, 0.5=BP, 1=HP)</td></tr>
+                    <tr><td><span class="key">M</span></td><td>Mod family — walk the slot's routing list with arrow keys, edit depth</td></tr>
+                    <tr><td><span class="key">B</span></td><td>CLAIM_HYBRID — promote <code>BLOB_ONLY</code> → <code>HYBRID</code> (player can now play notes)</td></tr>
+                    <tr><td><span class="key">N</span></td><td>CREATE_EMPTY — next <code>IDLE</code> slot becomes <code>KEYBOARD_ONLY</code></td></tr>
+                    <tr><td><span class="key">T</span></td><td>TIE_BLOB — bind selected <code>KEYBOARD_ONLY</code> slot to next blob to be born</td></tr>
+                    <tr><td><span class="key">D</span></td><td>DETACH — break blob bind; voice continues as <code>KEYBOARD_ONLY</code></td></tr>
+                    <tr><td><span class="key">R</span></td><td>Reset selected param to its default base value</td></tr>
+                    <tr><td><span class="key">C</span></td><td>Clear all routings on the selected slot</td></tr>
+                    <tr><td><span class="key">TAB</span></td><td>Return to PERFORMANCE mode (edit state is saved on the slot)</td></tr>
+                </tbody>
+            </table>
+        </div>
+
+        <div class="control-block">
+            <h4>Voice-state ring legend</h4>
+            <p style="font-size:0.95rem; margin-bottom:0.4rem;">In the video overlay, every tracked blob bound to a slot gets a coloured ring whose colour encodes the slot's lifecycle state. The currently selected slot's ring is drawn thicker (3 px vs 2 px) and slightly larger.</p>
+            <div class="state-legend">
+                <div class="state-pill"><span class="state-dot blob"></span><span><strong>BLOB_ONLY</strong> — driven entirely by blob CV</span></div>
+                <div class="state-pill"><span class="state-dot keyboard"></span><span><strong>KEYBOARD_ONLY</strong> — player edits &amp; plays</span></div>
+                <div class="state-pill"><span class="state-dot hybrid"></span><span><strong>HYBRID</strong> — player notes + blob modulation</span></div>
+                <div class="state-pill"><span class="state-dot zombie"></span><span><strong>ZOMBIE</strong> — soft-sustain, ~4 s resurrection window</span></div>
+            </div>
+        </div>
+
+        <div class="control-block">
+            <h4>OpenCV video-window keys</h4>
+            <p style="font-size:0.95rem; margin-bottom:0.6rem;">These keys work only when the OpenCV video window has focus. They toggle overlays and adjust the persistence threshold for blob detection — useful during calibration. Music keys do not work here.</p>
+            <table>
+                <thead><tr><th>Key</th><th>Toggle / action</th></tr></thead>
+                <tbody>
+                    <tr><td><span class="key">q</span></td><td>Quit application</td></tr>
+                    <tr><td><span class="key">v</span></td><td>Voice slot HUD on/off (right-side panel)</td></tr>
+                    <tr><td><span class="key">t</span></td><td>Tracking overlay (rings, IDs, info line)</td></tr>
+                    <tr><td><span class="key">o</span></td><td>Blob contour outlines</td></tr>
+                    <tr><td><span class="key">m</span></td><td>Merge tree overlay</td></tr>
+                    <tr><td><span class="key">f</span></td><td>Optical flow vector field</td></tr>
+                    <tr><td><span class="key">c</span></td><td>Wax-colour and combined mask windows</td></tr>
+                    <tr><td><span class="key">[</span> / <span class="key">]</span></td><td>Persistence threshold −/+ 2.0 (min 2.0, max 80.0)</td></tr>
+                </tbody>
+            </table>
+        </div>
+
+    </div>
 </section>
 
 <!-- VERSIONS -->
 <section id="versions">
     <h2>Version History</h2>
-    <p>Four architectural iterations, each addressing concrete failure modes observed in the previous version. The progression reflects a shift from generic multi-object tracking toward domain-specific methods that exploit the unique physical properties of a lava lamp — and, most recently, toward preserving sonic identity across the detection gaps that physical-system noise inevitably produces.</p>
+    <p>Five architectural iterations, each addressing concrete failure modes observed in the previous version. The progression goes from generic multi-object tracking toward domain-specific methods that exploit the physics of a lava lamp — and, with v4.0, from autonomous translator to performable instrument.</p>
 
     <div class="versions">
         <div class="version">
@@ -829,10 +994,16 @@ ESP32 → 4" plinth speaker (acoustic feedback closes the loop)</div>
             <p>Optical flow mask advection replaced per-frame assignment as the primary identity carrier — identity is the mask, solved once at birth, not every frame. Wasserstein-inspired topological matching in the birth-death plane (75% weight) resolves ambiguous overlaps. A 5-state physics Kalman <code>[x, y, vx, vy, ay]</code> with buoyancy mean-reversion and directional <code>ay</code> priors handles turning-point dynamics. Birth topology fingerprinting enables re-identification after transparency gaps. Circular mean hue classified into rising / falling / turning direction drives attack / release envelopes and oscillator detuning.</p>
         </div>
 
+        <div class="version">
+            <h3><span class="v-tag">v3.2</span>Stability Against Turning-Point Storms</h3>
+            <p>Four targeted changes to eliminate the cascade of phantom births, deaths, and release-tail stacking that occurred when wax blobs reversed direction: (1) <code>MAX_COAST 8 → 20</code> frames — tracks survive longer detection gaps, ~1.3 s at 15 fps. (2) <strong>MOG2 learning rate throttled to 1e-4</strong> after warm-up, effectively freezing the background model. (3) <strong>Hue down-weighted</strong> in the fingerprint distance (divisor 25 → 60), so a full thermal reversal no longer blows past the match threshold on its own. (4) <strong>Zombie voice slot-pool</strong>: when a tracker ID disappears, its voice is held at soft sustain for up to 4 s; the next nearby blob with compatible persistence resurrects it in place.</p>
+        </div>
+
         <div class="version current">
-            <h3><span class="v-tag">v3.2</span>Stability Against Turning-Point Storms<span class="current-tag">current</span></h3>
-            <p>Four targeted changes to eliminate the cascade of phantom births, deaths, and release-tail stacking that occurred when wax blobs reversed direction:</p>
-            <p><strong>(1) MAX_COAST 8 → 20 frames</strong> — tracks survive longer detection gaps, roughly 1.3 s at 15 fps instead of 0.5 s. <strong>(2) MOG2 learning rate throttled to 1e-4</strong> after warm-up, effectively freezing the background model, so stationary wax pooling at turning points is no longer absorbed into the background. <strong>(3) Hue term down-weighted</strong> in the fingerprint distance (divisor 25 → 60), so a full thermal reversal (~70° hue shift) no longer blows past the match threshold on its own. <strong>(4) Zombie voice slot-pool</strong> with resurrection window: when a tracker ID disappears, its voice is held at a soft sustain for up to 4 s rather than released; the next nearby blob with compatible persistence resurrects it in place. This eliminates release-tail stacking and preserves sonic identity across detector gaps the tracker itself could not bridge.</p>
+            <h3><span class="v-tag">v4.0</span>MPE Edition — Voice Slots &amp; Player Agency<span class="current-tag">current</span></h3>
+            <p>v4.0 reframes the relationship between blob and voice. Through v3.2 the system was a one-way translator — blobs produced sound. v4.0 turns the voice into a first-class object that the blob is one of several possible drivers of; the other driver is the human at a computer keyboard.</p>
+            <p><strong>(1) Voice-slot abstraction.</strong> A fixed pool of 16 voice slots replaces the implicit <code>blob_id → voice</code> mapping. Each slot carries its own synth state and a lifecycle state of <code>IDLE</code>, <code>BLOB_ONLY</code>, <code>KEYBOARD_ONLY</code>, <code>HYBRID</code>, or <code>ZOMBIE</code>. The v3.2 zombie pool is preserved as a sub-state of <code>BLOB_ONLY</code>. <strong>(2) MPE-friendly SynthDef.</strong> The v3.2 <code>\blobVoice</code> is replaced by <code>\mpeVoice</code> — a wavetable oscillator (<code>VOsc</code> across 16 contiguous buffers), state-variable filter with continuous LP↔BP↔HP crossfade, ADSR, and per-voice OSC namespace. <code>\blobAngle</code> and <code>\blobStrike</code> remain as optional auxiliary voices. <strong>(3) Computer-keyboard MPE controller.</strong> A pygame input layer turns the laptop keyboard into a 16-voice MPE surface with Performance and Edit modes. <strong>(4) Bidirectional blob ↔ voice binding.</strong> The <code>BindingManager</code> makes blob-driven and player-driven voice creation symmetric: blobs can spawn voices, the player can pre-arm empty voices and tie them to the next-born blob, and any voice can be in HYBRID. <strong>(5) Routing matrix.</strong> Each voice carries an explicit <code>(source → destination, depth, curve)</code> routing list. Default routings reproduce v3.2 behaviour; the player rewrites them in real time. <strong>(6) Controller abstraction.</strong> All input is funnelled through a <code>Controller</code> protocol that emits <code>ControllerEvent</code>s. Phase 2's external MIDI surface adds a single new adapter — nothing downstream changes.</p>
+            <p style="margin-top:0.6rem;"><strong>Removed in v4.0:</strong> the plinth, ESP32 feedback speaker, three-camera system, and the closed-loop acoustic feedback concept. The musical interest now comes from the player–blob duet, not from the lamp's sound modulating its own behaviour.</p>
         </div>
     </div>
 </section>
@@ -843,8 +1014,7 @@ ESP32 → 4" plinth speaker (acoustic feedback closes the loop)</div>
 
     <div class="dive">
         <h3>Persistent homology as a significance filter</h3>
-        <p>Rather than detecting blobs by thresholding intensity or filtering by area — both of which conflate size with significance — persistence measures how prominent a blob is relative to its local surroundings across a continuous range of intensity thresholds. The H0 persistence diagram treats the greyscale image as a scalar function: as a threshold sweeps from high to low intensity, connected components 'born' at blob peaks 'die' when they merge with a brighter neighbour. A blob's persistence is the intensity gap between its peak and the saddle point where it merges.</p>
-        <p>The input is inverted (<code>255.0 - small</code>) so OpenCV's 'bright = foreground' becomes 'low value = foreground' matching GUDHI's sublevel-set sweep. Downscaling to ~320×240 keeps <code>CubicalComplex</code> under ~40 ms on an M1 Mac.</p>
+        <p>Rather than detecting blobs by thresholding intensity or filtering by area — both of which conflate size with significance — persistence measures how prominent a blob is relative to its local surroundings across a continuous range of intensity thresholds. The H0 persistence diagram treats the greyscale image as a scalar function: as a threshold sweeps from high to low intensity, connected components 'born' at blob peaks 'die' when they merge with a brighter neighbour. A blob's persistence is the intensity gap between its peak and the saddle point where it merges. The input is inverted (<code>255.0 - small</code>) so OpenCV's 'bright = foreground' becomes 'low value = foreground' matching GUDHI's sublevel-set sweep; downscaling to ~320×240 keeps <code>CubicalComplex</code> under ~40 ms on an M-series Mac. A sublevel-set branch deduplication pass removes same-branch sub-features using the elder rule.</p>
     </div>
 
     <div class="dive">
@@ -864,20 +1034,33 @@ ESP32 → 4" plinth speaker (acoustic feedback closes the loop)</div>
     </div>
 
     <div class="dive">
-        <h3>Birth topology fingerprinting</h3>
-        <p>When a track is retired, its fingerprint (birth, persistence, area, y_norm, mean_hue, direction) at the moment of loss is stored in the <code>ReidentificationBuffer</code>. New detections not matched to any existing mask are checked against the buffer before a birth event fires. The v3.2 hue divisor of 60 (up from 25) means a 70° hue flip now contributes 0.14 to the distance instead of 0.34 — leaving headroom for topological and positional terms to carry the match through a thermal reversal. Records expire after 15 seconds — long enough to cover a transparency gap, short enough that a genuine death does not linger.</p>
-    </div>
-
-    <div class="dive">
-        <h3>Thermodynamic hue as phase indicator</h3>
-        <p>Lava lamp wax undergoes a measurable hue shift across its thermal cycle. Wax near the heat source (about to rise) is hotter and slightly more yellow-orange; wax that has risen, cooled, and is falling is darker and more red. Circular mean hue is essential because OpenCV's H channel is periodic at 0/180 — a naïve arithmetic mean of <code>H=2</code> and <code>H=178</code> yields green, whereas the correct circular mean is red. Direction drives Kalman <code>ay</code> initialisation, voice-manager attack/release times, and the fingerprint-buffer direction penalty.</p>
-    </div>
-
-    <div class="dive">
         <h3>The zombie voice pool</h3>
-        <p>The zombie pool is the sonic analogue of the tracker's flow-advected mask: SC synth nodes are preserved across short-lived tracker gaps, giving each blob a continuous audible identity even when detection fails entirely. It addresses the specific failure mode where a turning blob fires death → birth in rapid succession and the release tail of the dead voice stacks against the attack of the new voice — producing the ~9-second phantom polyphony that plagued v3.0 turning events.</p>
-        <p><strong>Lifecycle.</strong> On death, a blob_id's voice is moved from <code>self.voices</code> to <code>self._zombies</code>. The SC node stays alive (<code>gate=1</code>) but its amp is multiplied by <code>0.35</code>, audibly softening without triggering release. Before spawning a fresh voice for any new blob, the manager scans the zombie pool for a match within ~15% of lamp height whose persistence is within a factor of 3×. The closest match wins: its blob_id is rewritten and it re-enters <code>self.voices</code>, morphing seamlessly toward the new target values. Zombies older than <code>zombie_window = 4 s</code> release normally.</p>
-        <p><strong>Why soft sustain?</strong> Silent holds would click on resurrection. Full-amp holds would stack during coordinated turn events. <code>0.35</code> audibly softens (so the listener hears the blob 'rest') but retains enough level that smoothing back up reads as brightening rather than re-starting — matching the physical behaviour of wax pooling at a turning point.</p>
+        <p>The zombie pool addresses the failure mode where a turning blob fires death → birth in rapid succession and the release tail of the dead voice stacks against the attack of the new voice — producing the ~9-second phantom polyphony that plagued v3.0 turning events.</p>
+        <p><strong>Lifecycle.</strong> On <code>on_blob_death</code>, a <code>BLOB_ONLY</code> voice's slot transitions to <code>ZOMBIE</code>. The SC node stays alive (<code>gate=1</code>) but its amp is multiplied by <code>0.35</code>, audibly softening without triggering release. Before spawning a fresh voice for any new blob, the <code>BindingManager</code> asks the <code>VoiceManager</code> to scan zombies for a match within ~15% of lamp height whose persistence is within a factor of 3×. The closest match wins: its slot transitions back to <code>BLOB_ONLY</code>, morphing seamlessly toward the new target values. Zombies older than <code>zombie_window = 4 s</code> release normally.</p>
+        <p><strong>v4.0 integration.</strong> The zombie pool is now a sub-state of the slot lifecycle rather than a side-table. A <code>HYBRID</code> voice whose player has been active within <code>blob_recent_play_window = 5 s</code> detaches to <code>KEYBOARD_ONLY</code> instead of zombifying — the player keeps the voice; the blob bind drops.</p>
+    </div>
+
+    <div class="dive">
+        <h3>Voice-slot architecture <span style="color:var(--color-accent); font-family:var(--font-mono); font-size:0.7em;">v4.0</span></h3>
+        <p>v4.0's central new abstraction. A <code>Voice</code> is no longer implicitly a 1:1 image of a blob — it is a slot in a fixed pool, holding full synth state, a routing matrix, and a lifecycle state that is independent of any given blob's existence. The state determines what events the slot accepts:</p>
+        <p><code>IDLE</code> accepts only <code>spawn_for_blob</code> or <code>create_empty</code>. <code>BLOB_ONLY</code> runs the routing matrix and forwards no keyboard input. <code>KEYBOARD_ONLY</code> accepts notes and edits but ignores blob updates. <code>HYBRID</code> accepts both — the player's notes set base values, the routing matrix adds modulation on top. <code>ZOMBIE</code> is a transient state with a timer. Each slot's <code>SynthState</code> tracks both editable base values and smoothed current/target values for every continuous output parameter; first-order lag on the SC side ensures parameter changes never click.</p>
+    </div>
+
+    <div class="dive">
+        <h3>MPE routing matrix <span style="color:var(--color-accent); font-family:var(--font-mono); font-size:0.7em;">v4.0</span></h3>
+        <p>Every <code>Voice</code> carries a list of <code>Routing(src, dst, depth, curve)</code> tuples. Sources read blob CV features each frame — <code>y_norm</code>, <code>x_norm</code>, <code>vy</code>, <code>persistence</code>, <code>area</code>, <code>mean_hue</code>, <code>elongation</code>, <code>orientation</code>, <code>age</code>. Destinations write directly to synth parameters — <code>pitch</code>, <code>cutoff</code>, <code>res</code>, <code>amp</code>, <code>pan</code>, <code>wave_pos</code>, <code>attack</code>, <code>release</code>. Curves are pre-tabulated lookup arrays (<code>LIN</code>, <code>LOG</code>, <code>EXP</code>, <code>SCURVE</code>, <code>SQRT</code>) — cheap to evaluate and trivial for the user to extend.</p>
+        <p>Default routings on <code>BLOB_ONLY</code> voices reproduce v3.2 behaviour: <code>y_norm → pitch</code> (depth +24 semitones, LIN), <code>persistence → amp</code> (SQRT), <code>vy → wave_pos</code> and <code>area → wave_pos</code> (kinematic + geometric), <code>elongation → res</code> (depth +0.6), <code>orientation → pan</code> (depth +1.0), plus an <code>EventRoute</code> firing <code>direction_change → attack/release preset</code>. The <code>mean_hue → wave_pos</code> mapping was removed in v3.2 because camera-firmware variations made blob hue an unreliable continuous source; <code>Source.MEAN_HUE</code> remains available for explicit wiring.</p>
+    </div>
+
+    <div class="dive">
+        <h3>The \mpeVoice SynthDef <span style="color:var(--color-accent); font-family:var(--font-mono); font-size:0.7em;">v4.0</span></h3>
+        <p>One <code>\mpeVoice</code> instance runs per active voice slot. The oscillator is <code>VOsc</code> reading across 16 contiguous wavetable buffers (4 banks × 4 wavetables, allocated with <code>Buffer.allocConsecutive</code>): bank 0 = analogue shapes (saw / square / pulse / triangle), bank 1 = harmonic-series sweeps, bank 2 = formants (ah / eh / ih / oh), bank 3 = metallic / bell partials. The filter section uses parallel <code>RLPF</code> / <code>BPF</code> / <code>RHPF</code> crossfaded via <code>SelectX.ar</code> on the <code>fmode</code> parameter, giving a continuous LP↔BP↔HP morph. Full ADSR envelope drives amplitude; <code>.lag</code> smoothing on every continuous parameter (50 ms typical, 100 ms on amp, 1 s on attack/release) matches Python's first-order smoothing so cross-frame changes never click.</p>
+    </div>
+
+    <div class="dive">
+        <h3>Controller abstraction <span style="color:var(--color-accent); font-family:var(--font-mono); font-size:0.7em;">v4.0</span></h3>
+        <p>All player input is funnelled through a <code>Controller</code> protocol that emits <code>ControllerEvent</code> dataclasses. The <code>VoiceManager</code> and <code>BindingManager</code> only see <code>ControllerEvent</code>s; they do not know whether the source is a keyboard, an external MIDI controller, an OSC stream from a tablet, or a future voice-to-MIDI bridge. The Phase 1 <code>KeyboardController</code> and Phase 2 <code>MIDIController</code> are interchangeable adapters.</p>
+        <p>Why this is worth the small upfront cost: the temptation in Phase 1 is to wire pygame keys directly to <code>VoiceManager</code> methods. That works, but Phase 2 then becomes a refactor instead of an add. A 60-line <code>Controller</code> protocol now makes Phase 2 a ~100-line <code>MIDIController</code> plus a small JSON learn-map file. The same protocol can later host a Push 3 adapter, a TouchOSC layout, or a tablet UI without disturbing anything downstream of it.</p>
     </div>
 </section>
 
@@ -885,92 +1068,131 @@ ESP32 → 4" plinth speaker (acoustic feedback closes the loop)</div>
 <section id="build">
     <h2>Build</h2>
 
-    <h3>Phase 1 — Core Pipeline</h3>
+    <h3>Phase 1 — Core (single camera + keyboard)</h3>
     <table>
         <thead>
             <tr><th>Component</th><th>Purpose</th><th class="num">Est. (GBP)</th></tr>
         </thead>
         <tbody>
-            <tr><td>MacBook Pro (M-series)</td><td>Vision pipeline, GUDHI, SuperCollider, MIDI</td><td class="num">£1,099+</td></tr>
-            <tr><td>Logitech Brio 4K / C922 Pro</td><td>Primary camera @ 1280×960</td><td class="num">£75–95</td></tr>
-            <tr><td>Focusrite Scarlett Solo (3rd gen)</td><td>Audio interface, stereo out + MIDI</td><td class="num">£110–130</td></tr>
-            <tr><td>Mathmos Astro lava lamp (500 ml)</td><td>Installation object</td><td class="num">£35–50</td></tr>
-            <tr><td>Yamaha HS5 (pair)</td><td>Powered studio monitors</td><td class="num">£120–300</td></tr>
-            <tr><td>Behringer DeepMind 6 Module</td><td>6-voice analogue polysynth (optional)</td><td class="num">£130–165</td></tr>
+            <tr><td>MacBook Pro (M-series)</td><td>Central compute — vision, GUDHI, SuperCollider, keyboard input</td><td class="num">existing or £1,099+</td></tr>
+            <tr><td>Logitech Brio 4K or C922 Pro</td><td>Primary camera (calibrated at 1280×960)</td><td class="num">£75–95</td></tr>
+            <tr><td>Articulated camera arm / desk clamp</td><td>Position camera 30–40 cm from lamp</td><td class="num">£8–12</td></tr>
+            <tr><td>Focusrite Scarlett Solo (3rd gen)</td><td>Audio interface — stereo SC output</td><td class="num">£110–130</td></tr>
+            <tr><td>Mathmos Astro lava lamp (500 ml)</td><td>Primary installation object</td><td class="num">£35–50</td></tr>
+            <tr><td>TRS 3.5 mm to XLR cables (pair)</td><td>Scarlett outputs to powered monitors</td><td class="num">£8–12</td></tr>
+            <tr><td>Powered studio monitors (e.g. Yamaha HS5)</td><td>Main audio output</td><td class="num">£120–300</td></tr>
         </tbody>
     </table>
 
-    <h3>Phase 2 — Additional Components</h3>
+    <h3>Phase 1 — Optional</h3>
     <table>
         <thead>
             <tr><th>Component</th><th>Purpose</th><th class="num">Est. (GBP)</th></tr>
         </thead>
         <tbody>
-            <tr><td>Logitech C920 HD</td><td>Camera B: close crop upper zone (melodic voice)</td><td class="num">£55–70</td></tr>
-            <tr><td>Logitech C270 / C310</td><td>Camera C: base / heat zone (bass voice)</td><td class="num">£22–30</td></tr>
-            <tr><td>ESP32-S3 DevKitC-1 (N16R8)</td><td>Feedback speaker I2S, LED ring, watchdog</td><td class="num">£10–15</td></tr>
-            <tr><td>PCM5102A I2S DAC</td><td>ESP32 I2S DAC for plinth speaker</td><td class="num">£5–9</td></tr>
-            <tr><td>TPA3116D2 amplifier</td><td>Drives plinth speaker; 12V powered</td><td class="num">£8–14</td></tr>
-            <tr><td>4&quot; full-range speaker</td><td>Plinth feedback driver (Visaton FRS 10)</td><td class="num">£10–14</td></tr>
-            <tr><td>WS2812B LED ring (60)</td><td>Visual sync ring around lamp base</td><td class="num">£10–16</td></tr>
-            <tr><td>6 mm birch plywood sheets</td><td>Plinth construction</td><td class="num">£22–35</td></tr>
+            <tr><td>Behringer DeepMind 6 Module (used)</td><td>Optional analogue voice for one or two slots; driven via Scarlett MIDI out</td><td class="num">£130–165</td></tr>
+            <tr><td>DIN-5 MIDI cable 1 m</td><td>Required only if the DeepMind 6 is in the rig</td><td class="num">£5–8</td></tr>
+        </tbody>
+    </table>
+
+    <h3>Phase 2 — External MIDI controller</h3>
+    <p>Phase 2 swaps the laptop keyboard for an assignable knob/button MIDI surface. The rest of the system does not change — the <code>MIDIController</code> adapter sits behind the same <code>Controller</code> protocol, with a small JSON learn-map persisted to disk.</p>
+    <table>
+        <thead>
+            <tr><th>Candidate</th><th>Layout</th><th class="num">Approx.</th></tr>
+        </thead>
+        <tbody>
+            <tr><td>MIDI Fighter Twister</td><td>16 endless RGB push-encoders × 4 banks (64 logical) — best overall match; RGB feedback for state recall</td><td class="num">£200</td></tr>
+            <tr><td>Faderfox EC4</td><td>16 endless encoders + OLED labels, 4 setups — most engineered controller in this class</td><td class="num">£400</td></tr>
+            <tr><td>Faderfox PC12</td><td>12 endless encoders + buttons, 16 setups, OLED — cheaper EC4 alternative</td><td class="num">£280</td></tr>
+            <tr><td>Novation Launch Control XL</td><td>24 absolute knobs + 8 faders + 16 buttons + 8 templates — voice-strip mixer feel</td><td class="num">£170</td></tr>
+            <tr><td>Akai MIDImix</td><td>24 absolute knobs + 9 faders + 16 buttons — cheapest functional option, no knob LEDs</td><td class="num">£100</td></tr>
         </tbody>
     </table>
 
     <h3>Software stack</h3>
-    <p>Python 3.11.9 pinned for macOS compatibility with GUDHI and current OpenCV wheels. Core dependencies: <code>opencv-python ≥ 4.8</code>, <code>numpy ≥ 1.24</code>, <code>gudhi ≥ 3.7</code>, <code>scipy ≥ 1.10</code>, <code>python-osc ≥ 1.8</code>, <code>torch</code> (MPS on Apple Silicon), <code>sounddevice</code>, <code>mido + python-rtmidi</code>, <code>pyserial</code>. <a href="https://supercollider.github.io">SuperCollider 3.13+</a> for the synthesis server. PlatformIO CLI for the Phase 2 ESP32 firmware build.</p>
+    <p>Python 3.11.9 pinned for macOS compatibility with GUDHI and current OpenCV wheels. Core dependencies (<code>requirements.txt</code>): <code>opencv-python ≥ 4.8</code>, <code>numpy ≥ 1.24</code>, <code>scipy ≥ 1.10</code>, <code>python-osc ≥ 1.8</code>, <code>gudhi ≥ 3.7</code>. v4.0 (Phase 1) adds <code>pygame ≥ 2.5</code> for the keyboard controller; v4.0 (Phase 2 prep) adds <code>mido ≥ 1.3</code> and <code>python-rtmidi ≥ 1.5</code> for the MIDI controller stub. <a href="https://supercollider.github.io">SuperCollider 3.13+</a> for the synthesis server.</p>
 </section>
 
 <!-- TIMELINE -->
 <section id="timeline">
     <h2>Timeline &amp; Milestones</h2>
-    <p>Solo developer, 10–15 hours per week. Phase 1 is a complete exhibitable installation on its own.</p>
+    <p>Solo developer, 10–15 hours per week. Phase 1 is a complete, performable instrument on its own. Phase 2 is an additive upgrade — the system runs the entire time, gaining a new input source. The timeline assumes v3.2 tracking is already working.</p>
 
     <div class="milestones">
         <div class="milestone">
             <div class="m-tag">M1</div>
             <div class="m-label">Week 2</div>
-            <div class="m-desc">Detection calibrated — persistence threshold tuned, direction colours verified, per-blob hue stable.</div>
+            <div class="m-desc">Slot abstraction landed — <code>VoiceManager</code> refactored to 16-slot pool with <code>Voice</code> dataclass; v3.2 zombie behaviour preserved as <code>BLOB_ONLY</code> sub-state.</div>
         </div>
         <div class="milestone">
             <div class="m-tag">M2</div>
             <div class="m-label">Week 4</div>
-            <div class="m-desc">Audio from lamp motion — SuperCollider booted, direction-shaped attack/release audible, zombie-pool log lines on turning events.</div>
+            <div class="m-desc">SC layer ready — <code>\mpeVoice</code> SynthDef in SuperCollider (wavetable osc, SVF, ADSR), <code>/voice/&lt;n&gt;/</code> namespace, manual sanity tests passing.</div>
         </div>
         <div class="milestone">
             <div class="m-tag">M3</div>
             <div class="m-label">Week 6</div>
-            <div class="m-desc">Phase 1 exhibition-ready — macOS LaunchAgents, auto-restart verified, 8-hour overnight unattended test passed.</div>
+            <div class="m-desc">Blob CC modulating SC voices — pygame <code>KeyboardController</code> + routing matrix runtime; default routings reproducing v3.2 behaviour.</div>
         </div>
         <div class="milestone">
             <div class="m-tag">M4</div>
-            <div class="m-label">Week 9</div>
-            <div class="m-desc">Three-camera + ESP32 operational — Cameras B and C wired, ESP32 firmware flashed, LED ring installed.</div>
+            <div class="m-label">Week 7</div>
+            <div class="m-desc">Phase 1 complete — <code>BindingManager</code> bridges tracker events into slot lifecycle; <code>CREATE_EMPTY</code> / <code>TIE_BLOB</code> / <code>DETACH</code> / <code>CLAIM_HYBRID</code> functional end-to-end.</div>
         </div>
         <div class="milestone">
             <div class="m-tag">M5</div>
-            <div class="m-label">Week 12</div>
-            <div class="m-desc">Full closed-loop system — plinth built, feedback frequencies empirically tuned, 48-hour gallery simulation complete.</div>
+            <div class="m-label">Week 10</div>
+            <div class="m-desc">External controller online — <code>MIDIController</code> adapter active; MIDI Learn mode persists bindings to <code>learn_map.json</code>.</div>
         </div>
         <div class="milestone">
             <div class="m-tag">M6</div>
-            <div class="m-label">Week 13+</div>
-            <div class="m-desc">Exhibition-ready — artist statement, technical overview, process video, audio recording submitted.</div>
+            <div class="m-label">Week 12</div>
+            <div class="m-desc">Performable instrument — live-set workflow tuned: bank/page conventions, slot-select ergonomics, recall.</div>
         </div>
     </div>
 </section>
 
-<!-- PRIOR ART -->
+<!-- GUIDES -->
+<section id="guides">
+    <h2>Guides &amp; Reference</h2>
+    <p>Full build documentation and the keyboard reference card, hosted as PDFs.</p>
+
+    <div class="guides-grid">
+        <a class="guide-card" href="/subpages/lava_lamp_synth/guides/DSO_Complete_Guide_v4_0_MPE.pdf">
+            <span class="g-kind">PDF · v4.0 (MPE)</span>
+            <span class="g-title">Complete Build Guide</span>
+            <span class="g-desc">Methodology, pipeline architecture, six-stage walk-through, parts list, software install, twelve-week timeline, full technical deep dives, and appendices. The canonical reference for v4.0.</span>
+        </a>
+        <a class="guide-card" href="/subpages/lava_lamp_synth/guides/DSO_Keyboard_Reference_v4_0.pdf">
+            <span class="g-kind">PDF · v4.0</span>
+            <span class="g-title">Keyboard Reference Card</span>
+            <span class="g-desc">One-page-per-side player reference: Performance / Edit modes, slot select, note layout, parameter families, binding commands, OpenCV-window toggles, and four common workflows.</span>
+        </a>
+        <a class="guide-card" href="/subpages/lava_lamp_synth/guides/DynamicalSystemsOrchestration_Complete_Guide.pdf">
+            <span class="g-kind">PDF · v3.0 (archive)</span>
+            <span class="g-title">v3.0 Build Guide</span>
+            <span class="g-desc">Original physics-grounded, flow-advected tracking guide — flow advection, Wasserstein matching, physics Kalman, birth fingerprinting, calibration GUI. Preserved for reference; superseded by v4.0.</span>
+        </a>
+        <a class="guide-card" href="/subpages/lava_lamp_synth/guides/Audible_Lava_Complete_Phase_I_II.pdf">
+            <span class="g-kind">PDF · v2.x (archive)</span>
+            <span class="g-title">Audible Lava — Phase I &amp; II</span>
+            <span class="g-desc">Earlier macOS edition covering the original three-camera + ESP32 + plinth concept. Useful historical context; the v4.0 system has retired the closed acoustic feedback loop.</span>
+        </a>
+    </div>
+</section>
+
+<!-- NOVELTY -->
 <section id="prior-art">
     <h2>Novelty</h2>
-    <p>To the best of the author's knowledge, this is the first work to combine: (1) a physical lava lamp as live input, (2) H0 persistent homology for topological blob significance filtering, (3) flow-advected mask identity with Wasserstein topological matching, (4) physics-informed buoyancy Kalman with directional priors, (5) birth topology fingerprinting for re-identification, (6) thermodynamic hue as a phase indicator driving musical parameters, (7) a zombie voice pool preserving sonic identity across detection gaps, and (8) a physical acoustic feedback loop in which the music modulates the lamp's wax behaviour.</p>
+    <p>To the best of the author's knowledge, this is the first work to combine: (1) a physical lava lamp as live input, (2) H0 persistent homology for topological blob significance filtering, (3) flow-advected mask identity with Wasserstein-inspired topological matching, (4) physics-informed buoyancy Kalman with directional priors, (5) birth topology fingerprinting for re-identification, (6) thermodynamic hue as a phase indicator driving musical parameters, (7) a zombie voice pool preserving sonic identity across detection gaps, and (8) a bidirectional voice-slot architecture in which blob CV features and player input share the same MPE-style polysynthesiser as continuous-modulation and discrete-event sources respectively.</p>
 </section>
 
 </main>
 
 <footer>
     <div class="footer-flex">
-        <div>Dynamic Systems Orchestration · Complete Build Guide v3.2</div>
+        <div>Dynamical Systems Orchestration · Complete Build Guide v4.0 (MPE)</div>
         <div><a href="https://samleventhal.com">samleventhal.com</a></div>
     </div>
 </footer>
