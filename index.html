@@ -352,6 +352,112 @@
             margin-top: 0.75rem;
         }
 
+        .citation .author-self {
+            font-style: normal;
+            font-weight: 600;
+            color: var(--color-text);
+        }
+
+        /* Small link chips beneath each publication (PDF / arXiv / Code) */
+        .paper-links {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 0.4rem;
+            margin-top: 0.75rem;
+        }
+
+        .paper-link {
+            display: inline-flex;
+            align-items: center;
+            padding: 0.2rem 0.7rem;
+            font-family: var(--font-body);
+            font-size: 0.7rem;
+            font-weight: 600;
+            text-transform: uppercase;
+            letter-spacing: 0.06em;
+            color: var(--color-accent);
+            background: transparent;
+            border: 1px solid var(--color-border);
+            border-radius: 999px;
+            transition: background 0.15s ease, color 0.15s ease, border-color 0.15s ease;
+        }
+
+        .paper-link:hover,
+        .paper-link:focus-visible {
+            background: var(--color-accent);
+            color: #fff;
+            border-color: var(--color-accent);
+            border-bottom-color: var(--color-accent);
+            outline: none;
+        }
+
+        /* Featured (most recent) publication gets a subtle highlight */
+        .research-item.featured {
+            background: linear-gradient(180deg, #f6ecec 0%, var(--color-bg-alt) 100%);
+            border-left-width: 4px;
+        }
+
+        .research-badge {
+            display: inline-block;
+            margin-left: 0.5rem;
+            padding: 0.1rem 0.55rem;
+            font-family: var(--font-body);
+            font-size: 0.6rem;
+            font-weight: 700;
+            text-transform: uppercase;
+            letter-spacing: 0.08em;
+            color: #fff;
+            background: var(--color-accent);
+            border-radius: 4px;
+            vertical-align: middle;
+        }
+
+        /* Collaborators block */
+        .collaborators-list {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 0.6rem;
+            list-style: none;
+            margin: 1.25rem 0 0;
+            padding: 0;
+        }
+
+        .collaborators-list li {
+            margin: 0;
+        }
+
+        .collaborators-list a {
+            display: inline-flex;
+            align-items: center;
+            padding: 0.4rem 0.95rem;
+            font-size: 0.9rem;
+            font-weight: 500;
+            color: var(--color-text);
+            background: var(--color-bg-alt);
+            border: 1px solid var(--color-border);
+            border-radius: 999px;
+            transition: background 0.15s ease, color 0.15s ease, border-color 0.15s ease;
+        }
+
+        .collaborators-list a:hover,
+        .collaborators-list a:focus-visible {
+            background: var(--color-accent);
+            color: #fff;
+            border-color: var(--color-accent);
+            border-bottom-color: var(--color-accent);
+            outline: none;
+        }
+
+        .collab-graph-placeholder {
+            margin-top: 1.5rem;
+            padding: 1rem 1.25rem;
+            font-size: 0.85rem;
+            color: var(--color-text-muted);
+            background: var(--color-bg-alt);
+            border: 1px dashed var(--color-border);
+            border-radius: 8px;
+        }
+
         /* Project Cards */
         .projects-grid {
             display: grid;
@@ -872,6 +978,7 @@
     <nav aria-label="Main navigation">
         <ul>
             <li><button type="button" class="nav-btn" data-target="about">About</button></li>
+            <li><button type="button" class="nav-btn" data-target="collaborators">Collaborators</button></li>
             <li><button type="button" class="nav-btn" data-target="research">Research</button></li>
             <li><button type="button" class="nav-btn" data-target="projects">Projects</button></li>
             <li><button type="button" class="nav-btn" data-target="interests">Interests</button></li>
@@ -961,86 +1068,134 @@
             </div>
         </section>
 
+        <!-- Collaborators Section -->
+        <section id="collaborators">
+            <h2>Collaborators</h2>
+            <p>
+                I have had the fortune of working with exceptional researchers across topology, geometry, and machine learning. A few of my closest collaborators:
+            </p>
+            <ul class="collaborators-list">
+                <li><a href="https://www.usfca.edu/faculty/mustafa-hajij" target="_blank" rel="noopener">Mustafa Hajij</a></li>
+                <li><a href="https://faculty.utah.edu/u6026185-Attila_Gyulassy/teaching/index.hml" target="_blank" rel="noopener">Attila Gyulassy</a></li>
+                <li><a href="https://www.sci.utah.edu/people/beiwang.html" target="_blank" rel="noopener">Bei Wang</a></li>
+                <li><a href="https://www.sci.utah.edu/people/valerio.html" target="_blank" rel="noopener">Valerio Pascucci</a></li>
+                <li><a href="https://bastianlb.github.io/" target="_blank" rel="noopener">Lennart Bastian</a></li>
+                <li><a href="https://tolgabirdal.github.io/" target="_blank" rel="noopener">Tolga Birdal</a></li>
+            </ul>
+            <!-- A network graph of collaborators, generated with our network-connectivity tool, will be embedded here. -->
+        </section>
+
         <!-- Research Section -->
         <section id="research">
             <h2>Research</h2>
             <p>
-              I have had the fortune of working with exceptional researchers including
-	        <a href="https://www.usfca.edu/news/welcoming-full-time-faculty" target="_blank" rel="noopener">Mustafa Hajij</a>
-                <a href="https://faculty.utah.edu/u6026185-Attila_Gyulassy/teaching/index.hml" target="_blank" rel="noopener">Attila Gyulassy</a>,
-                <a href="https://www.sci.utah.edu/people/beiwang.html" target="_blank" rel="noopener">Bei Wang</a>, and
-                <a href="https://www.sci.utah.edu/people/valerio.html" target="_blank" rel="noopener">Valerio Pascucci</a>.
+                My research sits at the intersection of machine learning, geometry, and topology, with an emphasis on structure that can be built into a model and reasoned about directly. A selection of publications and preprints follows, beginning with the most recent.
             </p>
 
-            <h3>Publications &amp; Abstracts</h3>
+            <h3>Publications &amp; Preprints</h3>
 
-            <article class="research-item">
-                <h3>Modeling Hierarchical Topological Structure in Scientific Images with Graph Neural Networks</h3>
+            <article class="research-item featured">
+                <h3>Topological Neural Operators<span class="research-badge">New</span></h3>
                 <p>
-                    Topological analysis reveals meaningful structure in data from a variety of scientific domains. We describe an approach integrating topological priors with graph neural networks for hierarchical feature extraction in scientific images.
+                    Topological Neural Operators (TNOs) lift operator learning from points and edges onto cell complexes, separating <em>where</em> information flows&mdash;governed by fixed topological operators&mdash;from <em>how</em> it is transformed, which is learned. The result respects the geometric support of physical quantities, exposes conservation and compatibility structure, and, with hierarchical variants for long-range coupling, improves accuracy across PDE benchmarks, including flows on irregular geometries.
                 </p>
                 <p class="citation">
-                    S. Leventhal, A. Gyulassy, V. Pascucci. Modeling hierarchical topological structure in scientific images with graph neural networks.
+                    L. Bastian, <span class="author-self">S. Leventhal</span>, M. Hajij, T. Birdal. Topological Neural Operators. arXiv:2606.09806, 2026.
                 </p>
-            </article>
-
-            <article class="research-item">
-                <h3>Exploring Classification of Topological Priors with Machine Learning for Feature Extraction</h3>
-                <p>
-                    In this paper, we describe an approach to creating learnable topological priors using machine learning techniques for improved feature extraction in complex datasets.
-                </p>
-                <p class="citation">
-                    S. Leventhal, A. Gyulassy, M. Heimann, and V. Pascucci, Exploring Classification of Topological Priors with Machine Learning for Feature Extraction.
-                </p>
+                <div class="paper-links">
+                    <a class="paper-link" href="https://arxiv.org/abs/2606.09806" target="_blank" rel="noopener">arXiv</a>
+                    <a class="paper-link" href="papers/Topological_Neural_Operators.pdf" target="_blank" rel="noopener">PDF</a>
+                    <a class="paper-link" href="https://circle-group.github.io/research/TNO" target="_blank" rel="noopener">Project Page</a>
+                </div>
             </article>
 
             <article class="research-item">
                 <h3>PAVE: An In Situ Framework for Scientific Visualization and Machine Learning</h3>
                 <p>
-                    Machine learning (ML) has emerged as a tool for understanding complex scientific phenomena. To address the ML and in situ visualization gap, we introduce PAVE—an in situ framework which addresses the data management needs of ML pipelines integrated with scientific simulations.
+                    PAVE addresses the gap between machine learning pipelines and in situ scientific visualization. It couples running simulations to ML over memory-to-memory transport, meeting the data-management needs of integrated workflows while avoiding the I/O bottlenecks that typically separate a model from the system it is learning from.
                 </p>
                 <p class="citation">
-                    <a href="https://sc19.supercomputing.org/proceedings/workshops/workshop_pages/ws_drbsd104.html" target="_blank" rel="noopener">The International Workshop for Data-Driven Reduction of Big Scientific Data (DRBSD)</a>
+                    <span class="author-self">S. Leventhal</span>, et al. The International Workshop for Data-Driven Reduction of Big Scientific Data (DRBSD), 2019.
                 </p>
+                <div class="paper-links">
+                    <a class="paper-link" href="papers/PAVE.pdf" target="_blank" rel="noopener">PDF</a>
+                    <a class="paper-link" href="https://sc19.supercomputing.org/proceedings/workshops/workshop_pages/ws_drbsd104.html" target="_blank" rel="noopener">Venue</a>
+                </div>
             </article>
 
             <article class="research-item">
-                <h3>High-throughput Feature Extraction for Measuring Attributes of Deforming Open-Cell Foams</h3>
+                <h3>Exploring Classification of Topological Priors with Machine Learning for Feature Extraction</h3>
                 <p>
-                    Metallic open-cell foams are promising structural materials with applications in multifunctional systems. This work presents high-throughput methods for extracting and measuring foam cell attributes during deformation.
+                    We describe an approach to learning topological priors with machine learning, using the resulting representations to improve feature extraction in complex scientific data.
                 </p>
                 <p class="citation">
-                    <a href="https://ieeexplore.ieee.org/abstract/document/8807223/" target="_blank" rel="noopener">Petruzza, S. et al. IEEE, 2019</a>
+                    <span class="author-self">S. Leventhal</span>, A. Gyulassy, M. Heimann, V. Pascucci. Exploring Classification of Topological Priors with Machine Learning for Feature Extraction.
                 </p>
+                <div class="paper-links">
+                    <a class="paper-link" href="papers/Exploring_Classification_of_Topological_Priors_with_Machine_Learning_for_Feature_Extraction.pdf" target="_blank" rel="noopener">PDF</a>
+                </div>
+            </article>
+
+            <article class="research-item">
+                <h3>Modeling Hierarchical Topological Structure in Scientific Images with Graph Neural Networks</h3>
+                <p>
+                    Topological analysis reveals meaningful structure across scientific domains. We integrate topological priors with graph neural networks for hierarchical feature extraction in scientific images, treating multi-scale structure as a first-class, learnable representation.
+                </p>
+                <p class="citation">
+                    <span class="author-self">S. Leventhal</span>, A. Gyulassy, V. Pascucci. Modeling Hierarchical Topological Structure in Scientific Images with Graph Neural Networks.
+                </p>
+                <div class="paper-links">
+                    <a class="paper-link" href="papers/Modeling_Hierarchical_Topological_Structure_in_Scientific_Images_with_Graph_Neural_Networks.pdf" target="_blank" rel="noopener">PDF</a>
+                </div>
+            </article>
+
+            <article class="research-item">
+                <h3>Topological Distortion from Dimension Reduction</h3>
+                <p>
+                    With Bei Wang, we study how to reduce high-dimensional data while minimizing topological distortion. By preserving similarity between persistence diagrams, we identify projections that maintain first-degree homological features.
+                </p>
+                <p class="citation">
+                    <span class="author-self">S. Leventhal</span>, B. Wang.
+                </p>
+                <div class="paper-links">
+                    <a class="paper-link" href="https://github.com/sam-lev/topologicaldistortionofdimensionalityreduction" target="_blank" rel="noopener">Code</a>
+                </div>
             </article>
 
             <article class="research-item">
                 <h3>Application of a Convolutional Neural Network to Distinguish Burkitt Lymphoma from Diffuse Large B-Cell Lymphoma</h3>
                 <p>
-                    Burkitt lymphoma (BL) and diffuse large B-cell lymphoma (DLBCL) require accurate differentiation for treatment decisions. This work applies convolutional neural networks to assist in pathological classification.
+                    Burkitt lymphoma and diffuse large B-cell lymphoma require accurate differentiation for treatment decisions. This work applies convolutional neural networks to assist pathological classification.
                 </p>
                 <p class="citation">
-                    <a href="https://academic.oup.com/ajcp" target="_blank" rel="noopener">American Journal of Clinical Pathology</a>
+                    <span class="author-self">S. Leventhal</span>, et al. American Journal of Clinical Pathology.
                 </p>
+                <div class="paper-links">
+                    <a class="paper-link" href="papers/AI_FOR_LYMPHOMA_DETECTION_LEVENTHAL.pdf" target="_blank" rel="noopener">PDF</a>
+                    <a class="paper-link" href="https://academic.oup.com/ajcp" target="_blank" rel="noopener">Journal</a>
+                </div>
             </article>
 
             <article class="research-item">
-                <h3>Topological Distortion From Dimension Reduction</h3>
+                <h3>High-throughput Feature Extraction for Measuring Attributes of Deforming Open-Cell Foams</h3>
                 <p>
-                    Bei Wang and I tackle the problem of reducing high dimensional data while minimizing topological distortion. By preserving similarity between persistence diagrams, we identify optimal projections that maintain first degree homological features.
+                    Metallic open-cell foams are promising structural materials for multifunctional systems. This work presents high-throughput methods for extracting and measuring foam-cell attributes during deformation.
                 </p>
                 <p class="citation">
-                    <a href="https://github.com/sam-lev/topologicaldistortionofdimensionalityreduction" target="_blank" rel="noopener">View on GitHub</a>
+                    S. Petruzza, et al. (incl. <span class="author-self">S. Leventhal</span>). IEEE, 2019.
                 </p>
+                <div class="paper-links">
+                    <a class="paper-link" href="https://ieeexplore.ieee.org/abstract/document/8807223/" target="_blank" rel="noopener">IEEE</a>
+                </div>
             </article>
 
             <article class="research-item">
                 <h3>A Deterministic Sketch for Geometric Extents</h3>
                 <p>
-                    We consider a point set P in a d-dimensional space of size u. Our goal is to efficiently compute geometric extent measures using deterministic sketching techniques.
+                    Given a point set in <em>d</em>-dimensional space, we develop deterministic sketching techniques for efficiently computing geometric extent measures.
                 </p>
                 <p class="citation">
-                    Authors: Sam Leventhal and Jeff M. Phillips
+                    <span class="author-self">S. Leventhal</span>, J. M. Phillips.
                 </p>
             </article>
         </section>
