@@ -1,0 +1,50 @@
+[
+    {
+  "slug": "hodge-currents",
+	"title": "Hodge Dynamics: Currents, Committors, and Cycles",
+  "date": "2026-06-25",
+  "excerpt": "The discrete Hodge decomposition reads a system's committor, its non-equilibrium circulation, and its metastable basins at once, on toy potentials and on real molecular dynamics.",
+  "tags": ["topology", "molecular dynamics", "machine learning"],
+  "cover": "media/result2_harmonic.png",
+  "coverAlt": "Harmonic winding current on a driven torus"
+    },
+{
+    "slug": "tno-ablation-tutorial",
+    "title": "Topological Neural Operators: A Runnable Ablation Tutorial",
+    "date": "2026-07-01",
+    "excerpt": "A self-contained, paper-style notebook probing whether the Hodge decomposition gives a neural operator the right inductive bias for PDEs on domains with holes.",
+    "tags": ["topology", "machine learning", "neural operators"]
+  },
+  {
+    "slug": "cutlass-restoration",
+    "title": "Restoring a 1973 Oldsmobile Cutlass Supreme",
+    "date": "2026-07-01",
+    "excerpt": "A running log of the repair jobs, guides, and hard-won lessons from working on a 1973 Cutlass Supreme.",
+    "tags": ["restoration", "cars", "hands-on"]
+  },
+  {
+    "slug": "lava-lamp-synth",
+    "title": "Dynamical Systems Orchestration: A Lava-Lamp Synthesiser",
+    "date": "2026-07-01",
+    "excerpt": "Turning a lava lamp into a performable instrument with persistent homology, optical-flow tracking, and a sixteen-voice polysynth.",
+    "tags": ["topology", "music", "creative coding"]
+  },
+    {
+    "slug": "field-notes-persistent-homology",
+    "title": "Field notes: reading a persistence diagram",
+    "date": "2026-06-18",
+    "excerpt": "A short, friendly walkthrough of what the dots in a persistence diagram are actually telling you — and what they are not.",
+    "tags": ["topology", "tda", "notes"],
+    "cover": "media/cover-persistence.svg",
+    "coverAlt": "Stylized persistence diagram"
+  },
+  {
+    "slug": "starting-a-writing-space",
+    "title": "Starting a writing space",
+    "date": "2026-06-10",
+    "excerpt": "Why I added a small blog to the site, and how it works under the hood.",
+    "tags": ["meta", "notes"],
+    "cover": "media/cover-writing.svg",
+    "coverAlt": "A nib pen mark"
+  }
+]

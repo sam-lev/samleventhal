@@ -1,0 +1,7 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 800 600" role="img" aria-label="A writing mark">
+  <rect width="800" height="600" fill="#f0efed"/>
+  <line x1="160" y1="430" x2="640" y2="430" stroke="#d4d2cf" stroke-width="2"/>
+  <line x1="160" y1="470" x2="640" y2="470" stroke="#d4d2cf" stroke-width="2"/>
+  <text x="400" y="360" font-family="'Cormorant Garamond', Georgia, serif" font-size="320" fill="#8b2332" text-anchor="middle" font-style="italic" font-weight="600">W</text>
+  <circle cx="565" cy="345" r="10" fill="#a83344"/>
+</svg>

@@ -1,0 +1,20 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 800 600" role="img" aria-label="Stylized persistence diagram">
+  <rect width="800" height="600" fill="#f0efed"/>
+  <!-- axes -->
+  <line x1="120" y1="500" x2="680" y2="500" stroke="#d4d2cf" stroke-width="2"/>
+  <line x1="120" y1="500" x2="120" y2="100" stroke="#d4d2cf" stroke-width="2"/>
+  <!-- diagonal -->
+  <line x1="120" y1="500" x2="600" y2="100" stroke="#5a5a5a" stroke-width="2" stroke-dasharray="6 8" opacity="0.6"/>
+  <!-- dots near diagonal (noise) -->
+  <circle cx="250" cy="395" r="7" fill="#5a5a5a" opacity="0.45"/>
+  <circle cx="330" cy="330" r="7" fill="#5a5a5a" opacity="0.45"/>
+  <circle cx="200" cy="445" r="6" fill="#5a5a5a" opacity="0.4"/>
+  <circle cx="410" cy="270" r="6" fill="#5a5a5a" opacity="0.4"/>
+  <!-- persistent features -->
+  <circle cx="230" cy="200" r="13" fill="#8b2332"/>
+  <circle cx="340" cy="150" r="11" fill="#a83344"/>
+  <circle cx="180" cy="280" r="10" fill="#8b2332" opacity="0.85"/>
+  <!-- labels -->
+  <text x="400" y="555" font-family="Georgia, serif" font-size="26" fill="#5a5a5a" text-anchor="middle" font-style="italic">birth</text>
+  <text x="70" y="300" font-family="Georgia, serif" font-size="26" fill="#5a5a5a" text-anchor="middle" font-style="italic" transform="rotate(-90 70 300)">death</text>
+</svg>
