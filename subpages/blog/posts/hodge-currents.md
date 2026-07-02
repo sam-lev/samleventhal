@@ -240,4 +240,4 @@ cd experiments && python run_all.py     # Results 1-3
 python ala2_openmm.py                    # Results 4-5 (needs openmm + mdtraj)
 ```
 
-The full code is on GitHub: [github.com/sam-lev/hodge-currents](https://github.com/sam-lev/hodge-currents).
+The full code is on GitHub: [github.com/sam-lev/hodge-currents](https://github.com/sam-lev/hodge_dynamics).
