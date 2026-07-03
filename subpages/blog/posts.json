@@ -1,7 +1,7 @@
 [
   {
     "slug": "geodesics-topological-go",
-    "title": "Geodesics: Go on Any Surface You Can Imagine",
+      "title": "Geodesics: an Algebraic Topological Abstraction of Go - Connectivity and Incidence Generalized.",
     "date": "2026-07-03",
     "excerpt": "Go's rules never needed the board to be a flat grid — so Geodesics lets you play on a sphere, a torus, a Möbius band, or a 3D lattice, tiled however you like, with the mathematics explained on hover.",
     "tags": [
