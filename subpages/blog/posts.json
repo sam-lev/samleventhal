@@ -28,23 +28,5 @@
     "date": "2026-07-01",
     "excerpt": "Turning a lava lamp into a performable instrument with persistent homology, optical-flow tracking, and a sixteen-voice polysynth.",
     "tags": ["topology", "music", "creative coding"]
-  },
-    {
-    "slug": "field-notes-persistent-homology",
-    "title": "Field notes: reading a persistence diagram",
-    "date": "2026-06-18",
-    "excerpt": "A short, friendly walkthrough of what the dots in a persistence diagram are actually telling you — and what they are not.",
-    "tags": ["topology", "tda", "notes"],
-    "cover": "media/cover-persistence.svg",
-    "coverAlt": "Stylized persistence diagram"
-  },
-  {
-    "slug": "starting-a-writing-space",
-    "title": "Starting a writing space",
-    "date": "2026-06-10",
-    "excerpt": "Why I added a small blog to the site, and how it works under the hood.",
-    "tags": ["meta", "notes"],
-    "cover": "media/cover-writing.svg",
-    "coverAlt": "A nib pen mark"
   }
 ]
