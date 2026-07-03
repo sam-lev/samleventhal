@@ -28,5 +28,27 @@
     "date": "2026-07-01",
     "excerpt": "Turning a lava lamp into a performable instrument with persistent homology, optical-flow tracking, and a sixteen-voice polysynth.",
     "tags": ["topology", "music", "creative coding"]
+  },
+     {
+    "slug": "geodesics-topological-go",
+    "title": "Geodesics: Go on Any Surface You Can Imagine",
+    "date": "2026-07-03",
+    "excerpt": "Go's rules never needed the board to be a flat grid — so Geodesics lets you play on a sphere, a torus, a Möbius band, or a 3D lattice, tiled however you like, with the mathematics explained on hover.",
+    "tags": [
+      "topology",
+      "games",
+      "creative coding"
+    ]
+  },
+  {
+    "slug": "leveraging-topology-dissertation",
+    "title": "Leveraging Topology to Advance Machine Learning Models and Methods",
+    "date": "2026-07-03",
+    "excerpt": "A short tour of my PhD dissertation: keeping the learning problem entirely inside the topological domain, from Morse–Smale priors graphs to hierarchical, filtration-learning graph neural networks.",
+    "tags": [
+      "topology",
+      "machine learning",
+      "graph neural networks"
+    ]
   }
 ]
