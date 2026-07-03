@@ -1,0 +1,6 @@
+# Geodesics pilot
+# The engine itself (geodesics/ package) has ZERO runtime dependencies.
+# These are needed only for the demo renderer (--png) and the test suite.
+numpy>=2.0
+matplotlib>=3.9
+pytest>=8.0
