@@ -1,35 +1,5 @@
 [
-    {
-  "slug": "hodge-currents",
-	"title": "Hodge Dynamics: Currents, Committors, and Cycles",
-  "date": "2026-06-25",
-  "excerpt": "The discrete Hodge decomposition reads a system's committor, its non-equilibrium circulation, and its metastable basins at once, on toy potentials and on real molecular dynamics.",
-  "tags": ["topology", "molecular dynamics", "machine learning"],
-  "cover": "media/result2_harmonic.png",
-  "coverAlt": "Harmonic winding current on a driven torus"
-    },
-{
-    "slug": "tno-ablation-tutorial",
-    "title": "Topological Neural Operators: A Runnable Ablation Tutorial",
-    "date": "2026-07-01",
-    "excerpt": "A self-contained, paper-style notebook probing whether the Hodge decomposition gives a neural operator the right inductive bias for PDEs on domains with holes.",
-    "tags": ["topology", "machine learning", "neural operators"]
-  },
   {
-    "slug": "cutlass-restoration",
-    "title": "Restoring a 1973 Oldsmobile Cutlass Supreme",
-    "date": "2026-07-01",
-    "excerpt": "A running log of the repair jobs, guides, and hard-won lessons from working on a 1973 Cutlass Supreme.",
-    "tags": ["restoration", "cars", "hands-on"]
-  },
-  {
-    "slug": "lava-lamp-synth",
-    "title": "Dynamical Systems Orchestration: A Lava-Lamp Synthesiser",
-    "date": "2026-07-01",
-    "excerpt": "Turning a lava lamp into a performable instrument with persistent homology, optical-flow tracking, and a sixteen-voice polysynth.",
-    "tags": ["topology", "music", "creative coding"]
-  },
-     {
     "slug": "geodesics-topological-go",
     "title": "Geodesics: Go on Any Surface You Can Imagine",
     "date": "2026-07-03",
@@ -50,5 +20,51 @@
       "machine learning",
       "graph neural networks"
     ]
+  },
+  {
+    "slug": "tno-ablation-tutorial",
+    "title": "Topological Neural Operators: A Runnable Ablation Tutorial",
+    "date": "2026-07-01",
+    "excerpt": "A self-contained, paper-style notebook probing whether the Hodge decomposition gives a neural operator the right inductive bias for PDEs on domains with holes.",
+    "tags": [
+      "topology",
+      "machine learning",
+      "neural operators"
+    ]
+  },
+  {
+    "slug": "cutlass-restoration",
+    "title": "Restoring a 1973 Oldsmobile Cutlass Supreme",
+    "date": "2026-07-01",
+    "excerpt": "A running log of the repair jobs, guides, and hard-won lessons from working on a 1973 Cutlass Supreme.",
+    "tags": [
+      "restoration",
+      "cars",
+      "hands-on"
+    ]
+  },
+  {
+    "slug": "lava-lamp-synth",
+    "title": "Dynamical Systems Orchestration: A Lava-Lamp Synthesiser",
+    "date": "2026-07-01",
+    "excerpt": "Turning a lava lamp into a performable instrument with persistent homology, optical-flow tracking, and a sixteen-voice polysynth.",
+    "tags": [
+      "topology",
+      "music",
+      "creative coding"
+    ]
+  },
+  {
+    "slug": "hodge-currents",
+    "title": "Hodge Dynamics: Currents, Committors, and Cycles",
+    "date": "2026-06-25",
+    "excerpt": "The discrete Hodge decomposition reads a system's committor, its non-equilibrium circulation, and its metastable basins at once, on toy potentials and on real molecular dynamics.",
+    "tags": [
+      "topology",
+      "molecular dynamics",
+      "machine learning"
+    ],
+    "cover": "media/result2_harmonic.png",
+    "coverAlt": "Harmonic winding current on a driven torus"
   }
 ]
