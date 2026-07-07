@@ -48,6 +48,15 @@ const SCALE_LABELS = ["I", "II", "III"];
 const CELLS_OK = { "sphere:tri": 1, "sphere:square": 1,
                    "torus:square": 1, "mobius:square": 1 };
 
+// incidence modes need face lists: all sphere/grid meshes that provide them.
+// (Goldberg is already the face-dual of the geodesic; hex grids and the 3D
+// box keep their canonical vertex boards.)
+const INC_OK = { "sphere:tri": 1, "sphere:square": 1, "torus:tri": 1,
+                 "torus:square": 1, "mobius:tri": 1, "mobius:square": 1 };
+const INC_MODES = ["vertices", "edges", "faces", "cells"];
+const INC_LABELS = { vertices: "Stones: vertices", edges: "Stones: edges",
+                     faces: "Stones: faces", cells: "Stones: all cells" };
+
 // paint palette (muted instrument hues)
 const PALETTE = [0x5bb0a0, 0xc98a3d, 0x7a93c4, 0xc4707a, 0x9db06b,
                  0x9a86c8, 0xb8a04a, 0x6aa8b8];
@@ -149,6 +158,7 @@ function buildBoard(surface, meshType, scaleIdx) {
       { k: "plate.deg", t: "deg " + degText(B.adj) },
     ];
     if (B.faces) B.cells = { faces: B.faces };
+    if (B.faces) B.meshFaces = B.faces;          // incidence derivation
   }
 
   else if (surface === "torus" || surface === "mobius") {
@@ -163,6 +173,8 @@ function buildBoard(surface, meshType, scaleIdx) {
       ? (u, v) => torusNormal(u, v, nx, ny)
       : (u, v) => mobiusNormal(u, v, nx, ny, MOB.R, MOB.w);
     B.pos = g.uv.map(([x, y]) => P(x, y));
+    B.uv = g.uv;
+    B._P = P; B._N = N; B._wrapY = wrapY; B._flipX = flipX;
     B.kind = surface;
     B.flatStones = surface === "mobius";
     B.normalAt = i => N(g.uv[i][0], g.uv[i][1]);
@@ -181,7 +193,7 @@ function buildBoard(surface, meshType, scaleIdx) {
       const modal = modalDegree(B.adj);
       B.adj.forEach((l, i) => { if (l.length < modal) B.defects.add(i); });
     }
-    if (meshType === "square") {
+    if (meshType === "square" || meshType === "tri") {
       // grid cells as faces (corner vertex ids, with seam identifications)
       const vid = (x, y) => y * nx + x;
       const red = (x, y) => {
@@ -190,17 +202,26 @@ function buildBoard(surface, meshType, scaleIdx) {
         else if (y < 0) { if (!wrapY) return null; y += ny; }
         return [x, y];
       };
-      const faces = [], patches = [];
+      const faces = [], patches = [], meshFaces = [], meshFaceUV = [];
+      const cellFaces = meshType === "square"
+        ? [[[0, 0], [1, 0], [1, 1], [0, 1]]]                      // one quad
+        : [[[0, 0], [1, 0], [1, 1]], [[0, 0], [1, 1], [0, 1]]];  // two triangles
       const ymax = wrapY ? ny : ny - 1;
       for (let y = 0; y < ymax; y++)
         for (let x = 0; x < nx; x++) {
-          const c = [[x, y], [x + 1, y], [x + 1, y + 1], [x, y + 1]].map(
-            ([cx, cy]) => red(cx, cy));
-          if (c.some(q => q === null)) continue;
-          faces.push(c.map(([cx, cy]) => vid(cx, cy)));
-          patches.push([x, y]);            // cover-coordinate cell corner
+          for (const corners of cellFaces) {
+            const uvs = corners.map(([dx, dy]) => [x + dx, y + dy]);
+            const c = uvs.map(([cx, cy]) => red(cx, cy));
+            if (c.some(q => q === null)) continue;
+            const ids = c.map(([cx, cy]) => vid(cx, cy));
+            meshFaces.push(ids);
+            meshFaceUV.push(uvs);
+            if (meshType === "square") { faces.push(ids); patches.push([x, y]); }
+          }
         }
-      B.cells = { faces, patches, P };
+      if (meshType === "square") B.cells = { faces, patches, P };
+      B.meshFaces = meshFaces;
+      B.meshFaceUV = meshFaceUV;
     }
     const surfSym = surface === "torus" ? "T\u00B2" : "M\u00B2";
     B.plate = [
@@ -246,6 +267,113 @@ function buildBoard(surface, meshType, scaleIdx) {
   return B;
 }
 
+// ---------- incidence derivation ----------------------------------------------
+// Rebuild the board with a different cell type as the playable sites, via
+// GeoCells: edges (line graph), faces (dual), or all cells (Hasse diagram).
+// The derived object keeps the board contract — adj / pos / normalAt /
+// edgeCurve / defects / plate — so the engine, renderer, picker and share
+// codec are untouched. Geometry: on the sphere every site is projected
+// radially; on grid quotients sites carry cover coordinates so edges and
+// stones cross seams (including the Möbius flip) exactly like vertices do.
+
+function deriveBoard(B, mode) {
+  if (mode === "vertices" || !B.meshFaces) return B;
+  const cx = GeoCells.fromMesh({ nVerts: B.adj.length, faces: B.meshFaces });
+  const d = GeoCells.build(cx, mode);
+  const nV = cx.nV, nE = cx.edges.length;
+
+  if (B.kind === "sphere") {
+    const unit = (p) => {
+      const r = Math.hypot(p[0], p[1], p[2]);
+      return [p[0] / r, p[1] / r, p[2] / r];
+    };
+    const uVert = B.pos.map(unit);
+    const uEdge = cx.edges.map(([a, b]) => unit([
+      uVert[a][0] + uVert[b][0], uVert[a][1] + uVert[b][1],
+      uVert[a][2] + uVert[b][2]]));
+    const uFace = cx.faces.map(f => {
+      const c = [0, 0, 0];
+      for (const v of f) for (let q = 0; q < 3; q++) c[q] += uVert[v][q];
+      return unit(c);
+    });
+    const uSite = mode === "edges" ? uEdge : mode === "faces" ? uFace
+      : uVert.concat(uEdge, uFace);
+    B.pos = uSite.map(p => [p[0] * RS, p[1] * RS, p[2] * RS]);
+    B.normalAt = i => uSite[i];
+    B.edgeCurve = (a, b, S) => {
+      const out = [];
+      for (let s = 0; s <= S; s++) {
+        const p = slerp(uSite[a], uSite[b], s / S);
+        out.push([p[0] * RS, p[1] * RS, p[2] * RS]);
+      }
+      return out;
+    };
+  } else {                                     // torus / möbius: cover coords
+    const P = B._P, N = B._N, wrapY = B._wrapY, flipX = B._flipX;
+    const uvVert = B.uv;
+    const uvEdge = cx.edges.map(([a, b]) => {
+      const [x1, y1] = uvVert[a];
+      const [x2, y2] = coverRep(x1, y1, uvVert[b][0], uvVert[b][1],
+                                B.nx, B.ny, true, wrapY, flipX);
+      return [(x1 + x2) / 2, (y1 + y2) / 2];
+    });
+    const uvFace = B.meshFaceUV.map(uvs => {
+      let x = 0, y = 0;
+      for (const [cx2, cy2] of uvs) { x += cx2; y += cy2; }
+      return [x / uvs.length, y / uvs.length];
+    });
+    const uvSite = mode === "edges" ? uvEdge : mode === "faces" ? uvFace
+      : uvVert.concat(uvEdge, uvFace);
+    B.pos = uvSite.map(([u, v]) => P(u, v));
+    B.uvSite = uvSite;
+    B.normalAt = i => N(uvSite[i][0], uvSite[i][1]);
+    B.edgeCurve = (a, b, S) => {
+      const [x1, y1] = uvSite[a];
+      const [x2, y2] = coverRep(x1, y1, uvSite[b][0], uvSite[b][1],
+                                B.nx, B.ny, true, wrapY, flipX);
+      const out = [];
+      for (let s = 0; s <= S; s++) {
+        const t = s / S;
+        out.push(P(x1 + (x2 - x1) * t, y1 + (y2 - y1) * t));
+      }
+      return out;
+    };
+  }
+
+  B.adj = d.neighbors;
+  B.dim = d.dim;
+  B.siteMode = mode;
+  B.inc = { mode, meta: d.meta };
+  B.cells = null;                              // cell paint is a vertex-mode view
+  B.edges = edgeList(B.adj);
+  B.minEdge = minEdgeLen(B.pos, B.edges);
+
+  // brass defects: degree differing from the modal degree of its dimension class
+  B.defects = new Set();
+  const byDim = {};
+  B.adj.forEach((l, i) => {
+    const k = B.dim[i];
+    (byDim[k] = byDim[k] || {})[l.length] = (byDim[k][l.length] || 0) + 1;
+  });
+  const modalOf = {};
+  for (const k in byDim) {
+    let best = 0;
+    for (const deg in byDim[k])
+      if (byDim[k][deg] > best) { best = byDim[k][deg]; modalOf[k] = +deg; }
+  }
+  B.adj.forEach((l, i) => { if (l.length !== modalOf[B.dim[i]]) B.defects.add(i); });
+
+  // plate: site mode segment + updated counts
+  const vSeg = B.plate.find(s => s.k === "plate.V");
+  if (vSeg) vSeg.t = "sites " + B.adj.length;
+  const dSeg = B.plate.find(s => s.k === "plate.deg");
+  if (dSeg) dSeg.t = "deg " + degText(B.adj);
+  const mi = B.plate.findIndex(s => s.k === "plate.mesh");
+  B.plate.splice(mi + 1, 0,
+    { k: "plate.sites", t: "on " + mode, edit: "incidence" });
+  return B;
+}
+
 // ---------- THREE scene ------------------------------------------------------
 
 const el = document.getElementById("view");
@@ -269,6 +397,8 @@ scene.add(group);
 
 const state = {
   surface: "sphere", mesh: "tri", scaleIdx: 1, paint: "ink",
+  incidence: "vertices",
+  opponent: "human", aiColor: WHITE, ai: { engine: null, busy: false },
   B: null, eng: null, over: false,
   showPA: false,
   meshes: { surface: null, edges: null, dots: [], stones: [], ghost: null,
@@ -462,7 +592,8 @@ let stoneGeo = null, stoneR = 0.1;
 
 function newBoard(pushHash) {
   clearGroup();
-  const B = buildBoard(state.surface, state.mesh, state.scaleIdx);
+  const B = deriveBoard(buildBoard(state.surface, state.mesh, state.scaleIdx),
+                        state.incidence);
   state.B = B;
   state.eng = Engine(B.adj, { komi: 7.5 });
   state.over = false;
@@ -492,7 +623,9 @@ function newBoard(pushHash) {
   paintDots(B); paintEdges(B);
   renderPlate();
   sync();
+  aiRebuild();
   if (pushHash !== false) syncHash();
+  scheduleAI();
 }
 
 function sync() {
@@ -560,7 +693,8 @@ function renderStatus() {
     return;
   }
   stat.innerHTML =
-    span("stat.turn", (eng.toMove === BLACK ? "Black" : "White") + " to play") +
+    span("stat.turn", (eng.toMove === BLACK ? "Black" : "White") + " to play" +
+      (aiActive() && eng.toMove === state.aiColor ? " (AI)" : "")) +
     " \u00B7 " + span("stat.captures",
       "captures B " + eng.captures[BLACK] + " / W " + eng.captures[WHITE]) +
     " \u00B7 " + span("stat.moves", "move " + eng.moves.length) +
@@ -589,28 +723,40 @@ const ERRTXT = {
   superko: "positional superko \u2014 this would repeat an earlier whole-board position",
 };
 
-function tryPlay(v) {
+function tryPlay(v, byAI) {
   if (state.over) { message("the game is over \u2014 New board to start again"); return; }
+  if (!byAI && aiActive() &&
+      (state.ai.busy || state.eng.toMove === state.aiColor)) {
+    message("the AI is to move"); return;
+  }
   const r = state.eng.play(v);
   if (r.err) { message(ERRTXT[r.err] || r.err); return; }
   if (r.captured.length)
     message((state.eng.toMove === WHITE ? "Black" : "White") +
       " captures " + r.captured.length);
   sync(); renderPlate(); syncHash();
+  scheduleAI();
 }
 
-function doPass() {
+function doPass(byAI) {
   if (state.over) return;
+  if (!byAI && aiActive() &&
+      (state.ai.busy || state.eng.toMove === state.aiColor)) {
+    message("the AI is to move"); return;
+  }
   const r = state.eng.pass();
   if (r.over) {
     state.over = true;
     message("two passes \u2014 territory scored (Tromp\u2013Taylor)", 0);
   } else message((state.eng.toMove === BLACK ? "Black" : "White") + " to play after pass");
   sync(); syncHash();
+  scheduleAI();
 }
 
 function doUndo() {
+  if (state.ai.busy) { message("the AI is thinking \u2014 undo after its move"); return; }
   if (state.eng.undo()) {
+    if (aiActive() && state.eng.toMove === state.aiColor) state.eng.undo();
     state.over = false;
     // reset any territory-tinted dots
     paintDots(state.B);
@@ -621,7 +767,8 @@ function doUndo() {
 // ---------- share / correspondence -------------------------------------------
 
 function currentCode() {
-  return encodeShare([state.surface, state.mesh, state.scaleIdx],
+  return encodeShare(
+    [state.surface, state.mesh, state.scaleIdx, state.incidence],
     state.eng.moves.map(mv => (mv[1] === null ? -1 : mv[1])));
 }
 
@@ -635,12 +782,18 @@ function loadShare(text) {
   try { st = decodeShare(text); }
   catch (e) { message("could not read that code: " + e.message); return false; }
   const [surf, mesh, idx] = st.s;
+  const inc = st.s.length > 3 ? st.s[3] : "vertices";
   if (!SURFACES[surf] || !SURFACES[surf].meshes[mesh] ||
       !SURFACES[surf].meshes[mesh].scales[idx]) {
     message("code names an unknown board spec"); return false;
   }
+  if (!INC_MODES.includes(inc) ||
+      (inc !== "vertices" && !INC_OK[surf + ":" + mesh])) {
+    message("code names an unknown site structure"); return false;
+  }
   state.surface = surf; state.mesh = mesh; state.scaleIdx = idx;
-  refreshSelectors();
+  state.incidence = inc;
+  refreshSelectors(); refreshPaintOptions();
   newBoard(false);
   for (const m of st.m) {
     const r = (m < 0) ? state.eng.pass() : state.eng.play(m);
@@ -653,6 +806,7 @@ function loadShare(text) {
   sync(); renderPlate(); syncHash();
   message("loaded shared game \u2014 " + state.eng.moves.length + " moves, " +
     (state.eng.toMove === BLACK ? "Black" : "White") + " to play", 5200);
+  scheduleAI();
   return true;
 }
 
@@ -677,6 +831,49 @@ function copyShare() {
       document.execCommand("copy"); done();
     });
   } else { document.execCommand("copy"); done(); }
+}
+
+// ---------- AI opponent --------------------------------------------------------
+// The engine (GeoAI) sees only the adjacency graph, the stone array and a
+// legal-move mask computed here by the host rules — legality (ko, superko,
+// suicide) never leaves the Engine above.
+
+function aiActive() { return state.opponent !== "human"; }
+
+function aiRebuild() {
+  if (!aiActive()) { state.ai.engine = null; state.ai.busy = false; return; }
+  const parts = state.opponent.split(":");          // "ai:<model>:<level>"
+  const m = GeoAI.models.find(x => x.id === parts[1]) || GeoAI.models[0];
+  state.ai.engine = m.create(state.B.adj, { level: parts[2] || "standard" });
+  state.ai.busy = false;
+}
+
+function scheduleAI() {
+  if (!aiActive() || state.over || state.ai.busy) return;
+  if (!state.ai.engine) aiRebuild();
+  if (state.eng.toMove !== state.aiColor) return;
+  state.ai.busy = true;
+  message("AI is thinking\u2026", 0);
+  setTimeout(aiMove, 60);                            // let the last stone paint
+}
+
+function aiMove() {
+  state.ai.busy = false;
+  if (!aiActive() || state.over || state.eng.toMove !== state.aiColor) {
+    message(""); return;
+  }
+  const eng = state.eng, n = state.B.adj.length;
+  const mask = new Uint8Array(n);
+  for (let v = 0; v < n; v++)
+    if (eng.colors[v] === EMPTY && !eng.trySim(v, state.aiColor).err) mask[v] = 1;
+  const r = state.ai.engine.pickMove(eng.colors, state.aiColor,
+                                     { legalMask: mask });
+  message("");
+  if (r.move < 0) {
+    doPass(true);
+    if (!state.over) message("AI passes (" + r.reason + ")");
+  }
+  else tryPlay(r.move, true);
 }
 
 // ---------- explanations (hover \u24D8, right-click / long-press) ----------------
@@ -721,13 +918,19 @@ const EXPLAIN = {
        state.B.edges.length + " connections. The Scale selector changes the mesh resolution \u2014 or click this readout before the first move to cycle it. Area scoring is a census of exactly these V points: stone, territory, or neutral." }),
   "plate.chi": () => {
     const B = state.B;
+    const M = B.inc ? B.inc.meta : null;
     let b;
     if (B.kind === "sphere") {
-      const F = B.faces ? B.faces.length : (B.adj.length / 2 + 2);
-      b = "\u03C7 = V \u2212 E + F = " + B.adj.length + " \u2212 " + B.edges.length +
-          " + " + F + " = 2. The Euler characteristic is a topological invariant \u2014 refine the mesh however you like, it never changes. \u03C7 = 2 is what forces the defects: a perfectly regular degree-6 (or 4, or 3) mesh can only exist at \u03C7 = 0.";
+      const V = M ? M.nV : B.adj.length;
+      const E = M ? M.nE : B.edges.length;
+      const F = M ? M.nF : (B.faces ? B.faces.length : (B.adj.length / 2 + 2));
+      b = "\u03C7 = V \u2212 E + F = " + V + " \u2212 " + E +
+          " + " + F + " = 2. The Euler characteristic is a topological invariant \u2014 refine the mesh however you like, it never changes. \u03C7 = 2 is what forces the defects: a perfectly regular degree-6 (or 4, or 3) mesh can only exist at \u03C7 = 0." +
+          (M ? " The formula is evaluated on the underlying mesh; the sites you are playing on are its " + B.siteMode + ", a derived graph drawn on the same surface \u2014 so \u03C7 is untouched." : "");
     } else {
-      b = "\u03C7 = 0: the torus, M\u00F6bius band and Klein bottle are the flat surfaces. Zero Euler characteristic is exactly the condition under which perfectly regular lattices close up with no defects \u2014 which is why this board has no forced brass points (only the boundary, if any).";
+      b = "\u03C7 = 0: the torus, M\u00F6bius band and Klein bottle are the flat surfaces." +
+          (M ? " Check it on this very mesh: V \u2212 E + F = " + M.nV + " \u2212 " + M.nE + " + " + M.nF + " = " + (M.nV - M.nE + M.nF) + "." : "") +
+          " Zero Euler characteristic is exactly the condition under which perfectly regular lattices close up with no defects \u2014 which is why this board has no forced brass points (only the boundary, if any).";
     }
     return { t: "\u03C7 \u2014 Euler characteristic", b };
   },
@@ -735,6 +938,24 @@ const EXPLAIN = {
     b: "The number of boundary circles of the surface. A classical 19\u00D719 board is a disk (\u2202 = 1) and its edge dominates strategy: corners first, then sides, then center. Closed surfaces (\u2202 = 0) abolish the edge entirely. The M\u00F6bius band keeps exactly one boundary circle \u2014 a single circle of double length that visits what looks like both rims." }),
   "plate.deg": () => ({ t: "degree \u2014 liberties per point",
     b: "Vertex degree = liberties of a lone stone there = the local branching factor. This board: " + fmtHist(state.B.adj) + ". Degree is the strongest strategy knob after topology: deg-3 boards are razor-sharp (eyes are cheap, chains die fast), deg-4 is classical, deg-6 favors thick unkillable shapes." }),
+  "plate.sites": () => {
+    const m = state.B.siteMode, M = state.B.inc.meta;
+    const t = { edges: "sites: the mesh's edges",
+                faces: "sites: the mesh's faces",
+                cells: "sites: all cells" }[m];
+    const b = m === "edges"
+      ? "Stones sit on the " + M.nE + " edges of the mesh; two sites are adjacent when the edges share a vertex. This is the <b>line graph</b> L(G) \u2014 the same move that turns the arcs of a topological graph into classifiable nodes. Liberties now count incident edges, so the feel of the game shifts even though the rules are word-for-word identical."
+      : m === "faces"
+      ? "Stones sit on the " + M.nF + " faces; two sites are adjacent when the faces share an edge. This is the <b>dual graph</b> \u2014 exactly the construction that turns the geodesic triangulation into the Goldberg board, now available on every surface here. Triangulated meshes give a deg-3 dual (sharp, fragile Go); quad meshes give deg-4."
+      : "Stones sit on every cell \u2014 " + M.nV + " vertices, " + M.nE + " edges and " + M.nF + " faces at once \u2014 adjacent by <b>incidence</b>: a vertex touches the edges it ends, an edge touches the faces it bounds. This is the Hasse diagram of the face poset: a cross-dimensional board where a chain can climb from a corner through an edge into a face. Degrees differ by dimension, so brass marks the irregulars within each class.";
+    return { t, b };
+  },
+  "sel.incidence": () => ({ t: "stones on \u2014 incidence structures",
+    b: "Which cells of the mesh are the playable sites. <b>Vertices</b>: the 1-skeleton \u2014 canonical Go. <b>Edges</b>: sites are mesh edges, adjacent when they share an endpoint \u2014 the line graph L(G). <b>Faces</b>: sites are faces, adjacent across shared edges \u2014 the dual graph (the geodesic sphere's dual is the Goldberg board, so this generalizes that construction to every surface). <b>All cells</b>: vertices, edges and faces together, adjacent by incidence \u2014 the Hasse diagram of the face poset, cross-dimensional Go. The rules never change: liberties, capture, superko and scoring only ever read the adjacency graph, whichever graph that is." }),
+  "sel.opponent": () => ({ t: "opponent \u2014 hierarchical GNN",
+    b: "Play against a fixed-weight hierarchical graph neural network. It reads the position as fields on the board graph: exact tactical features (liberties, capture, atari, eyes), message passing over 1- and 2-ring neighborhoods, and a <b>multi-persistence hierarchy</b> \u2014 the ascending/descending basins of its influence function, cancelled by topological persistence into nested coarser partitions, with messages combined jointly across all levels (after Leventhal, Gyulassy, Pascucci &amp; Heimann, NeurIPS 2022). A 1-ply lookahead guides the final choice; strength sets exploration noise, candidate width and lookahead. Because it only ever sees the adjacency graph, the same network plays every surface, mesh and incidence structure above." }),
+  "sel.aicolor": () => ({ t: "AI color",
+    b: "Which side the network plays. Give it Black and it opens; give it White and you do. Change it any time \u2014 the AI simply takes over that color's next turn." }),
   "stat.turn": () => ({ t: "to play",
     b: "Black and White alternate, Black first; a turn is a stone on an empty point, or a pass. After a placement, opponent chains left with no liberties are removed first, then the rule checks your own chain (self-capture is forbidden here). Finally, positional superko: a move may never recreate any earlier whole-board position \u2014 checked by hashing every position ever seen, which on wrap-around boards matters far more often than on the classical grid." }),
   "stat.captures": () => ({ t: "capturing",
@@ -828,6 +1049,9 @@ document.getElementById("plate").addEventListener("click", e => {
   } else if (seg.edit === "mesh") {
     const keys = Object.keys(SURFACES[state.surface].meshes);
     state.mesh = keys[(keys.indexOf(state.mesh) + 1) % keys.length];
+  } else if (seg.edit === "incidence") {
+    const modes = INC_OK[state.surface + ":" + state.mesh] ? INC_MODES : ["vertices"];
+    state.incidence = modes[(modes.indexOf(state.incidence) + 1) % modes.length];
   } else {
     state.scaleIdx = (state.scaleIdx + 1) %
       SURFACES[state.surface].meshes[state.mesh].scales.length;
@@ -878,7 +1102,9 @@ el.addEventListener("pointermove", e => {
   }
   const v = pickVertex(e.clientX, e.clientY);
   const g = state.meshes.ghost;
-  if (v >= 0 && state.eng.colors[v] === EMPTY && !state.over) {
+  const aiTurn = aiActive() &&
+    (state.ai.busy || state.eng.toMove === state.aiColor);
+  if (v >= 0 && state.eng.colors[v] === EMPTY && !state.over && !aiTurn) {
     const p = stonePosition(state.B, v, stoneR);
     g.position.set(p[0], p[1], p[2]);
     if (!state.B.flatStones) orientStone(state.B, g, v);
@@ -934,11 +1160,44 @@ function refreshSelectors() {
       (i === state.scaleIdx ? " selected" : "") + ">" + SCALE_LABELS[i] +
       " \u00B7 V " + specCount(state.surface, state.mesh, i) + "</option>"
   ).join("");
+  refreshIncidenceOptions();
+  refreshOpponentOptions();
+}
+
+function refreshIncidenceOptions() {
+  const ok = !!INC_OK[state.surface + ":" + state.mesh];
+  if (!ok) state.incidence = "vertices";
+  document.getElementById("incidence").innerHTML = INC_MODES.map(m => {
+    const avail = m === "vertices" || ok;
+    return '<option value="' + m + '"' +
+      (m === state.incidence ? " selected" : "") +
+      (avail ? "" : " disabled") + ">" + INC_LABELS[m] +
+      (avail ? "" : " \u2014 n/a") + "</option>";
+  }).join("");
+}
+
+function refreshOpponentOptions() {
+  const o = document.getElementById("opponent");
+  const many = GeoAI.models.length > 1;
+  const opts = ['<option value="human">Opponent: human</option>'];
+  for (const m of GeoAI.models)
+    for (const lv of m.levels)
+      opts.push('<option value="ai:' + m.id + ":" + lv + '">AI' +
+        (many ? " \u00B7 " + m.name : "") + " \u00B7 " + lv + "</option>");
+  o.innerHTML = opts.join("");
+  o.value = state.opponent;
+  const c = document.getElementById("aiColor");
+  c.innerHTML =
+    '<option value="2">AI plays White</option>' +
+    '<option value="1">AI plays Black</option>';
+  c.value = String(state.aiColor);
+  c.hidden = !aiActive();
 }
 
 function refreshPaintOptions() {
   const p = document.getElementById("paint");
-  const cellsOk = !!CELLS_OK[state.surface + ":" + state.mesh];
+  const cellsOk = !!CELLS_OK[state.surface + ":" + state.mesh] &&
+                  state.incidence === "vertices";
   if (!cellsOk && state.paint === "cells") state.paint = "ink";
   p.innerHTML = [
     ["ink", "Paint: ink"], ["vertex", "Paint: vertices"],
@@ -959,6 +1218,19 @@ document.getElementById("mesh").addEventListener("change", e => {
 document.getElementById("scale").addEventListener("change", e => {
   state.scaleIdx = +e.target.value;
   refreshSelectors(); newBoard();
+});
+document.getElementById("incidence").addEventListener("change", e => {
+  state.incidence = e.target.value;
+  refreshSelectors(); refreshPaintOptions(); newBoard();
+});
+document.getElementById("opponent").addEventListener("change", e => {
+  state.opponent = e.target.value;
+  document.getElementById("aiColor").hidden = !aiActive();
+  aiRebuild(); scheduleAI();
+});
+document.getElementById("aiColor").addEventListener("change", e => {
+  state.aiColor = +e.target.value;
+  scheduleAI();
 });
 document.getElementById("paint").addEventListener("change", e => {
   state.paint = e.target.value;
