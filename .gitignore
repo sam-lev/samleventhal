@@ -10,8 +10,12 @@ venv/
 --pycache__/
 __pycache__/
 .DS_Store
-.DS_Store/
+\.DS_Store/
 ./.DS_Store/
+
+# personal note taking file
+.notes
+\.notes
 
 # large runtime artifacts — download or train these, never commit them
 # large runtime artifacts — download or train these, never commit them
