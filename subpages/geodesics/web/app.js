@@ -67,6 +67,16 @@ const INC_MODES = ["vertices", "edges", "faces", "cells"];
 const INC_LABELS = { vertices: "Stones: vertices", edges: "Stones: edges",
                      faces: "Stones: faces", cells: "Stones: all cells" };
 
+// Does a model entry support the given board spec? A null/absent supports
+// object means "everything"; otherwise each present list is a whitelist.
+function modelSupports(m, surface, mesh, incidence, scaleIdx) {
+  const s = m.supports;
+  if (!s) return true;
+  const okIn = (list, val) => !list || list.includes(val);
+  return okIn(s.surfaces, surface) && okIn(s.meshes, mesh) &&
+         okIn(s.incidence, incidence) && okIn(s.scaleIdx, scaleIdx);
+}
+
 // paint palette (muted instrument hues)
 const PALETTE = [0x5bb0a0, 0xc98a3d, 0x7a93c4, 0xc4707a, 0x9db06b,
                  0x9a86c8, 0xb8a04a, 0x6aa8b8];
@@ -483,7 +493,8 @@ scene.add(group);
 const state = {
   surface: "sphere", mesh: "tri", scaleIdx: 1, paint: "ink",
   incidence: "vertices",
-  opponent: "human", aiColor: WHITE, ai: { engine: null, busy: false },
+  opponent: "human", aiColor: WHITE,
+  ai: { engine: null, busy: false, seq: 0 },
   B: null, eng: null, over: false,
   showPA: false,
   meshes: { surface: null, edges: null, dots: [], stones: [], ghost: null,
@@ -848,7 +859,7 @@ function doPass(byAI) {
 }
 
 function doUndo() {
-  if (state.ai.busy) { message("the AI is thinking \u2014 undo after its move"); return; }
+  cancelAI();
   if (state.eng.undo()) {
     if (aiActive() && state.eng.toMove === state.aiColor) state.eng.undo();
     state.over = false;
@@ -934,40 +945,72 @@ function copyShare() {
 
 function aiActive() { return state.opponent !== "human"; }
 
+function cancelAI() {
+  state.ai.seq++;
+  if (state.ai.busy) { state.ai.busy = false; message(""); }
+}
+
 function aiRebuild() {
-  if (!aiActive()) { state.ai.engine = null; state.ai.busy = false; return; }
+  cancelAI();
+  if (!aiActive()) { state.ai.engine = null; return; }
   const parts = state.opponent.split(":");          // "ai:<model>:<level>"
-  const m = GeoAI.models.find(x => x.id === parts[1]) || GeoAI.models[0];
-  state.ai.engine = m.create(state.B.adj, { level: parts[2] || "standard" });
-  state.ai.busy = false;
+  const m = GeoAI.models.find(x => x.id === parts[1]);
+  state.ai.engine = m ? m.create(state.B.adj, { level: parts[2] || "standard" })
+                      : null;
 }
 
 function scheduleAI() {
   if (!aiActive() || state.over || state.ai.busy) return;
   if (!state.ai.engine) aiRebuild();
+  if (!state.ai.engine) return;
   if (state.eng.toMove !== state.aiColor) return;
   state.ai.busy = true;
   message("AI is thinking\u2026", 0);
   setTimeout(aiMove, 60);                            // let the last stone paint
 }
 
+// pickMove may return a result synchronously (local engines) or a Promise
+// (bridge engines). A cancellation sequence number discards stale replies
+// after undo, new board, or an opponent switch; an illegal or malformed
+// reply from a misbehaving engine degrades to a pass, never to a bad board.
 function aiMove() {
-  state.ai.busy = false;
   if (!aiActive() || state.over || state.eng.toMove !== state.aiColor) {
-    message(""); return;
+    state.ai.busy = false; message(""); return;
   }
   const eng = state.eng, n = state.B.adj.length;
   const mask = new Uint8Array(n);
   for (let v = 0; v < n; v++)
     if (eng.colors[v] === EMPTY && !eng.trySim(v, state.aiColor).err) mask[v] = 1;
-  const r = state.ai.engine.pickMove(eng.colors, state.aiColor,
-                                     { legalMask: mask });
-  message("");
-  if (r.move < 0) {
-    doPass(true);
-    if (!state.over) message("AI passes (" + r.reason + ")");
-  }
-  else tryPlay(r.move, true);
+  const seq = state.ai.seq;
+  const apply = (r) => {
+    if (seq !== state.ai.seq) return;               // canceled meanwhile
+    state.ai.busy = false;
+    message("");
+    if (state.over || state.eng.toMove !== state.aiColor) return;
+    if (!r || typeof r.move !== "number" ||
+        (r.move >= 0 && !mask[r.move])) {
+      doPass(true);
+      if (!state.over) message("AI passes (no usable move returned)");
+      return;
+    }
+    if (r.move < 0) {
+      doPass(true);
+      if (!state.over)
+        message("AI passes" + (r.reason ? " (" + r.reason + ")" : ""));
+    } else tryPlay(r.move, true);
+  };
+  const fail = (e) => {
+    if (seq !== state.ai.seq) return;
+    state.ai.busy = false;
+    message("AI unavailable (" + ((e && e.message) || e) + ") \u2014 your move",
+            6000);
+  };
+  let r;
+  try { r = state.ai.engine.pickMove(eng.colors, state.aiColor,
+                                     { legalMask: mask }); }
+  catch (e) { fail(e); return; }
+  if (r && typeof r.then === "function") r.then(apply, fail);
+  else apply(r);
 }
 
 // ---------- explanations (hover \u24D8, right-click / long-press) ----------------
@@ -1284,10 +1327,23 @@ function refreshOpponentOptions() {
   const o = document.getElementById("opponent");
   const many = GeoAI.models.length > 1;
   const opts = ['<option value="human">Opponent: human</option>'];
-  for (const m of GeoAI.models)
-    for (const lv of m.levels)
-      opts.push('<option value="ai:' + m.id + ":" + lv + '">AI' +
-        (many ? " \u00B7 " + m.name : "") + " \u00B7 " + lv + "</option>");
+  let currentOk = state.opponent === "human";
+  for (const m of GeoAI.models) {
+    const ok = modelSupports(m, state.surface, state.mesh, state.incidence,
+                             state.scaleIdx);
+    for (const lv of m.levels) {
+      const val = "ai:" + m.id + ":" + lv;
+      if (val === state.opponent && ok) currentOk = true;
+      opts.push('<option value="' + val + '"' + (ok ? "" : " disabled") +
+        (val === state.opponent && ok ? " selected" : "") + ">AI" +
+        (many ? " \u00B7 " + m.name : "") + " \u00B7 " + lv +
+        (ok ? "" : " \u2014 n/a") + "</option>");
+    }
+  }
+  if (!currentOk && state.opponent !== "human") {
+    state.opponent = "human";
+    cancelAI(); state.ai.engine = null;
+  }
   o.innerHTML = opts.join("");
   o.value = state.opponent;
   const c = document.getElementById("aiColor");
@@ -1385,4 +1441,5 @@ try {
   else syncHash();
 } catch (e) { /* no hash in sandbox */ }
 group.rotation.x = 0.35; group.rotation.y = -0.5;
+bridgeConnect();
 (function loop() { requestAnimationFrame(loop); renderer.render(scene, camera); })();

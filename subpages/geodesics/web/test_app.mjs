@@ -72,7 +72,7 @@ function seamCheck(B, tol) {
         if (mode !== "vertices") {
           const m = B.inc.meta;
           const chi = m.nV - m.nE + m.nF;
-          const want = surf === "sphere" ? 2 : 0;
+          const want = surf === "sphere" ? 2 : surf === "plane" ? 1 : 0;
           if (chi !== want) bad.push(`${surf}:${mesh}:${mode} — chi ${chi}`);
         }
       }
@@ -103,6 +103,54 @@ function seamCheck(B, tol) {
   const B = deriveBoard(buildBoard("torus", "tri", 0), "edges"); // 7×7 tri
   ok(B.adj.length === 147, "7×7 tri torus edges mode: 147 line-graph sites",
      "n=" + B.adj.length);
+}
+
+// ---------- classical plane boards ----------------------------------------------
+{
+  const B = deriveBoard(buildBoard("plane", "square", 2), "vertices"); // 19×19
+  const corners = B.adj.filter(l => l.length === 2).length;
+  ok(B.adj.length === 361 && corners === 4 && B.defects.size === 72,
+     "19×19 plane: 361 points, 4 corners, brass rim of 72");
+}
+{
+  const B = deriveBoard(buildBoard("plane", "square", 0), "faces"); // 9×9
+  const m = B.inc.meta;
+  ok(B.adj.length === 64 && m.nV - m.nE + m.nF === 1 &&
+     B.adj.filter(l => l.length === 2).length === 4,
+     "9×9 plane faces mode: 64 cells, chi = 81 - 144 + 64 = 1");
+}
+{
+  const eng0 = core.Engine(deriveBoard(buildBoard("plane", "square", 2),
+                                       "vertices").adj);
+  const B = buildBoard("plane", "square", 2);
+  const ai = GeoAI.models[0].create(B.adj, { level: "strong", seed: 5 });
+  const r = ai.pickMove(new Int8Array(361), 1,
+                        { select: { temp: 0, noise: 0 } });
+  ok(r.move >= 0 && B.adj[r.move].length >= 3 && !eng0.play(r.move).err,
+     "AI opens legally on 19×19, away from the corners (site " + r.move + ")");
+}
+
+// ---------- honeycomb and Goldberg incidence ---------------------------------------
+{
+  const B = deriveBoard(buildBoard("torus", "hex", 0), "edges"); // 8×6 kagome
+  ok(B.adj.length === 72 && B.adj.every(l => l.length === 4),
+     "8×6 honeycomb torus edges mode: the kagome lattice (72 deg-4 sites)");
+}
+{
+  const B = deriveBoard(buildBoard("torus", "hex", 0), "faces");
+  ok(B.adj.length === 24 && B.adj.every(l => l.length === 6),
+     "8×6 honeycomb torus faces mode: the triangular dual (24 deg-6 sites)");
+}
+{
+  const B = deriveBoard(buildBoard("sphere", "hex", 0), "faces"); // GP(2) dual
+  const d5 = B.adj.filter(l => l.length === 5).length;
+  const d6 = B.adj.filter(l => l.length === 6).length;
+  ok(B.adj.length === 42 && d5 === 12 && d6 === 30,
+     "Goldberg GP(2) faces mode: the geodesic returns (42 sites, 12 pentagons)");
+}
+{
+  ok(!INC_OK["mobius:hex"],
+     "Möbius honeycomb stays a vertex board (flip shears the brick parity)");
 }
 
 // ---------- Möbius seam geometry: derived sites respect the deck transform ------
@@ -140,6 +188,42 @@ function seamCheck(B, tol) {
   const r = ai.pickMove(eng.colors, 1, { legalMask: mask });
   ok(r.move >= 0 && !eng.play(r.move).err,
      "AI opens legally on the torus Hasse-cells board (196 cross-dimensional sites)");
+}
+
+// ---------- models/ folder bundling + supports gating ------------------------------
+{
+  // replicate the build wrapper for models/random.js and register it
+  const before = GeoAI.models.length;
+  const wrapped = "(function () {\nconst WEIGHTS = null;\n" +
+    readFileSync("models/random.js", "utf8") + "\n})();";
+  vm.runInContext(wrapped, sandbox);
+  const rand = GeoAI.models.find(m => m.id === "random");
+  let legalOk = false;
+  if (rand) {
+    const N = [[1],[0,2],[1,3],[2,4],[3]];
+    const e = rand.create(N, {});
+    const stones = new Int8Array(5); stones[2] = 1;
+    const mask = new Uint8Array([1,1,0,1,1]);
+    const r = e.pickMove(stones, 1, { legalMask: mask });
+    legalOk = r.move >= 0 && mask[r.move] === 1;
+  }
+  ok(GeoAI.models.length === before + 1 && rand && legalOk,
+     "models/ file registers via the build wrapper and respects the mask");
+}
+{
+  const kata = { supports: { surfaces: ["plane"], meshes: ["square"],
+                             incidence: ["vertices"] } };
+  const anyb = { supports: null };
+  const ms = vm.runInContext("modelSupports", sandbox);
+  const k9 = { supports: { surfaces: ["plane"], meshes: ["square"],
+                           incidence: ["vertices"], scaleIdx: [0] } };
+  ok(ms(kata, "plane", "square", "vertices", 2) &&
+     !ms(kata, "torus", "square", "vertices", 0) &&
+     !ms(kata, "plane", "square", "faces", 0) &&
+     ms(anyb, "mobius", "hex", "vertices", 1) &&
+     ms(k9, "plane", "square", "vertices", 0) &&
+     !ms(k9, "plane", "square", "vertices", 2),
+     "supports gating: board whitelist, null = any, scaleIdx pins a 9\u00D79-only net");
 }
 
 // ---------- share spec round-trip with incidence ---------------------------------
