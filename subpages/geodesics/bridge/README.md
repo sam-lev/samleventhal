@@ -63,3 +63,15 @@ the app's. Test the adapter plumbing without a real KataGo:
     ← {"type":"move","id":N,"move":site-or--1,"info":"..."}   (or "error")
 
 Requests are stateless; the bridge may be restarted between moves.
+
+## Trained zero-style bot
+
+`bots/zero_mini.py` serves the checkpoint produced by
+`python/train/train_zero.py` (see `python/train/README.md`) — an
+AlphaZero-method graph net trained by self-play on the lowest-complexity
+variant of every topology. It stays hidden until
+`python/train/checkpoints/zero_mini.npz` exists, then advertises the
+surfaces and meshes it was trained on. Levels: casual samples the policy,
+standard plays its argmax, strong runs a 96-simulation search on the
+request's own adjacency graph.
+

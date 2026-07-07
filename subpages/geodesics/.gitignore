@@ -1,0 +1,5 @@
+# large runtime artifacts — download or train these, never commit them
+bridge/nets/*.bin.gz
+python/train/checkpoints/
+__pycache__/
+*.pyc
