@@ -117,8 +117,9 @@ function geodesicSphere(f) {
 }
 
 // ---------- Goldberg sphere: graph-level dual of the geodesic ----------------
-// Dual board only needs positions + adjacency: vertices at triangle centroids
-// (projected), adjacency across shared edges. Face polygons aren't required.
+// Vertices at triangle centroids (projected), adjacency across shared edges.
+// Faces: one per geodesic vertex — its incident triangles in cyclic order
+// (angular sort in the tangent plane), pentagons at the 12 defects.
 function goldbergSphere(f) {
   const g = geodesicSphere(f);
   const norm = (p) => {
@@ -141,7 +142,25 @@ function goldbergSphere(f) {
       } else byEdge.set(k, fid);
     }
   });
-  return { adj: adj.map(l => l.sort((x, y) => x - y)), positions };
+  const inc = g.positions.map(() => []);
+  g.faces.forEach((tri, fid) => { for (const v of tri) inc[v].push(fid); });
+  const faces = g.positions.map((p, v) => {
+    const ref = Math.abs(p[0]) < 0.9 ? [1, 0, 0] : [0, 1, 0];
+    const d = ref[0] * p[0] + ref[1] * p[1] + ref[2] * p[2];
+    let e1 = [ref[0] - d * p[0], ref[1] - d * p[1], ref[2] - d * p[2]];
+    const r1 = Math.hypot(e1[0], e1[1], e1[2]);
+    e1 = [e1[0] / r1, e1[1] / r1, e1[2] / r1];
+    const e2 = [p[1] * e1[2] - p[2] * e1[1],
+                p[2] * e1[0] - p[0] * e1[2],
+                p[0] * e1[1] - p[1] * e1[0]];
+    const ang = (fid) => {
+      const c = positions[fid];
+      return Math.atan2(c[0] * e2[0] + c[1] * e2[1] + c[2] * e2[2],
+                        c[0] * e1[0] + c[1] * e1[1] + c[2] * e1[2]);
+    };
+    return inc[v].slice().sort((a, b) => ang(a) - ang(b));
+  });
+  return { adj: adj.map(l => l.sort((x, y) => x - y)), positions, faces };
 }
 
 // ---------- cube-sphere: f x f quad subdivision of the cube ------------------

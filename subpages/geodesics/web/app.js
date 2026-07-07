@@ -18,6 +18,12 @@ const SURFACES = {
       hex:    { scales: [2, 3, 4] },        // Goldberg frequency
     },
   },
+  plane: {
+    label: "Plane D\u00B2",
+    meshes: {
+      square: { scales: [[9, 9], [13, 13], [19, 19]] },  // the classical boards
+    },
+  },
   torus: {
     label: "Torus T\u00B2",
     meshes: {
@@ -45,14 +51,18 @@ const MESH_LABELS = { tri: "Triangular \u00B7 deg 6",
                       square: "Square \u00B7 deg 4",
                       hex: "Hexagonal \u00B7 deg 3" };
 const SCALE_LABELS = ["I", "II", "III"];
-const CELLS_OK = { "sphere:tri": 1, "sphere:square": 1,
+const CELLS_OK = { "sphere:tri": 1, "sphere:square": 1, "sphere:hex": 1,
+                   "plane:square": 1,
                    "torus:square": 1, "mobius:square": 1 };
 
-// incidence modes need face lists: all sphere/grid meshes that provide them.
-// (Goldberg is already the face-dual of the geodesic; hex grids and the 3D
-// box keep their canonical vertex boards.)
-const INC_OK = { "sphere:tri": 1, "sphere:square": 1, "torus:tri": 1,
-                 "torus:square": 1, "mobius:tri": 1, "mobius:square": 1 };
+// incidence modes need face lists: all sphere meshes and the grid meshes
+// that close up. The Möbius honeycomb stays a vertex board — the flip
+// shears the bond parity at the seam, so its hexagons cannot close there
+// (verified per face at build time). The 3D box keeps its canonical board.
+const INC_OK = { "sphere:tri": 1, "sphere:square": 1, "sphere:hex": 1,
+                 "plane:square": 1,
+                 "torus:tri": 1, "torus:square": 1, "torus:hex": 1,
+                 "mobius:tri": 1, "mobius:square": 1 };
 const INC_MODES = ["vertices", "edges", "faces", "cells"];
 const INC_LABELS = { vertices: "Stones: vertices", edges: "Stones: edges",
                      faces: "Stones: faces", cells: "Stones: all cells" };
@@ -130,6 +140,7 @@ function buildBoard(surface, meshType, scaleIdx) {
     } else {
       g = goldbergSphere(scale);
       meshSym = "GP(" + scale + ",0)";
+      B.faces = g.faces;
     }
     B.adj = g.adj;
     B.pos = g.positions.map(p => [p[0] * RS, p[1] * RS, p[2] * RS]);
@@ -174,7 +185,7 @@ function buildBoard(surface, meshType, scaleIdx) {
       : (u, v) => mobiusNormal(u, v, nx, ny, MOB.R, MOB.w);
     B.pos = g.uv.map(([x, y]) => P(x, y));
     B.uv = g.uv;
-    B._P = P; B._N = N; B._wrapY = wrapY; B._flipX = flipX;
+    B._P = P; B._N = N; B._wrapX = true; B._wrapY = wrapY; B._flipX = flipX;
     B.kind = surface;
     B.flatStones = surface === "mobius";
     B.normalAt = i => N(g.uv[i][0], g.uv[i][1]);
@@ -193,7 +204,8 @@ function buildBoard(surface, meshType, scaleIdx) {
       const modal = modalDegree(B.adj);
       B.adj.forEach((l, i) => { if (l.length < modal) B.defects.add(i); });
     }
-    if (meshType === "square" || meshType === "tri") {
+    if (meshType === "square" || meshType === "tri" ||
+        (meshType === "hex" && wrapY)) {
       // grid cells as faces (corner vertex ids, with seam identifications)
       const vid = (x, y) => y * nx + x;
       const red = (x, y) => {
@@ -203,25 +215,52 @@ function buildBoard(surface, meshType, scaleIdx) {
         return [x, y];
       };
       const faces = [], patches = [], meshFaces = [], meshFaceUV = [];
-      const cellFaces = meshType === "square"
-        ? [[[0, 0], [1, 0], [1, 1], [0, 1]]]                      // one quad
-        : [[[0, 0], [1, 0], [1, 1]], [[0, 0], [1, 1], [0, 1]]];  // two triangles
       const ymax = wrapY ? ny : ny - 1;
-      for (let y = 0; y < ymax; y++)
-        for (let x = 0; x < nx; x++) {
-          for (const corners of cellFaces) {
-            const uvs = corners.map(([dx, dy]) => [x + dx, y + dy]);
+      if (meshType === "hex") {
+        // brick-wall hexagons: left wall at (x,y) with x ≡ y (mod 2). Every
+        // boundary edge is checked against the quotient graph — on a Möbius
+        // band the flip shears the bond parity at the seam, hexagons there
+        // fail to close, and the honeycomb keeps its canonical vertex board.
+        const ek = new Set();
+        B.adj.forEach((l, a) => l.forEach(b =>
+          ek.add(a < b ? a + ":" + b : b + ":" + a)));
+        const has = (i, j) => ek.has(i < j ? i + ":" + j : j + ":" + i);
+        for (let y = 0; y < ymax; y++)
+          for (let x = y % 2; x < nx; x += 2) {
+            const uvs = [[x, y], [x + 1, y], [x + 2, y],
+                         [x + 2, y + 1], [x + 1, y + 1], [x, y + 1]];
             const c = uvs.map(([cx, cy]) => red(cx, cy));
             if (c.some(q => q === null)) continue;
             const ids = c.map(([cx, cy]) => vid(cx, cy));
+            let closed = true;
+            for (let i = 0; i < 6; i++)
+              if (!has(ids[i], ids[(i + 1) % 6])) { closed = false; break; }
+            if (!closed) continue;
             meshFaces.push(ids);
             meshFaceUV.push(uvs);
-            if (meshType === "square") { faces.push(ids); patches.push([x, y]); }
           }
-        }
+      } else {
+        const cellFaces = meshType === "square"
+          ? [[[0, 0], [1, 0], [1, 1], [0, 1]]]                      // one quad
+          : [[[0, 0], [1, 0], [1, 1]], [[0, 0], [1, 1], [0, 1]]];  // two triangles
+        for (let y = 0; y < ymax; y++)
+          for (let x = 0; x < nx; x++) {
+            for (const corners of cellFaces) {
+              const uvs = corners.map(([dx, dy]) => [x + dx, y + dy]);
+              const c = uvs.map(([cx, cy]) => red(cx, cy));
+              if (c.some(q => q === null)) continue;
+              const ids = c.map(([cx, cy]) => vid(cx, cy));
+              meshFaces.push(ids);
+              meshFaceUV.push(uvs);
+              if (meshType === "square") { faces.push(ids); patches.push([x, y]); }
+            }
+          }
+      }
       if (meshType === "square") B.cells = { faces, patches, P };
-      B.meshFaces = meshFaces;
-      B.meshFaceUV = meshFaceUV;
+      if (meshFaces.length) {
+        B.meshFaces = meshFaces;
+        B.meshFaceUV = meshFaceUV;
+      }
     }
     const surfSym = surface === "torus" ? "T\u00B2" : "M\u00B2";
     B.plate = [
@@ -230,6 +269,51 @@ function buildBoard(surface, meshType, scaleIdx) {
       { k: "plate.V", t: "V " + B.adj.length, edit: "scale" },
       { k: "plate.chi", t: "\u03C7 0" },
       { k: "plate.boundary", t: "\u2202 " + (surface === "torus" ? 0 : 1) },
+      { k: "plate.deg", t: "deg " + degText(B.adj) },
+    ];
+  }
+
+  else if (surface === "plane") {          // the classical boards
+    const [nx, ny] = scale;
+    const g = gridQuotient(nx, ny, false, false, false, false, meshType);
+    B.adj = g.adj; B.nx = nx; B.ny = ny; B.uv = g.uv;
+    const sp = 2.8 / (Math.max(nx, ny) - 1);
+    B._sp = sp;
+    const P = (u, v) => [(u - (nx - 1) / 2) * sp, ((ny - 1) / 2 - v) * sp, 0];
+    const N = () => [0, 0, 1];
+    B._P = P; B._N = N; B._wrapX = false; B._wrapY = false; B._flipX = false;
+    B.pos = g.uv.map(([x, y]) => P(x, y));
+    B.kind = "plane";
+    B.normalAt = () => [0, 0, 1];
+    B.edgeCurve = (a, b, S) => {
+      const pa = B.pos[a], pb = B.pos[b], out = [];
+      for (let s = 0; s <= S; s++) {
+        const t = s / S;
+        out.push([pa[0] + (pb[0] - pa[0]) * t,
+                  pa[1] + (pb[1] - pa[1]) * t, 0]);
+      }
+      return out;
+    };
+    const modal = modalDegree(B.adj);
+    B.adj.forEach((l, i) => { if (l.length < modal) B.defects.add(i); });
+    // faces: every unit cell, no seams to reduce across
+    const vid = (x, y) => y * nx + x;
+    const faces = [], patches = [], meshFaceUV = [];
+    for (let y = 0; y < ny - 1; y++)
+      for (let x = 0; x < nx - 1; x++) {
+        faces.push([vid(x, y), vid(x + 1, y), vid(x + 1, y + 1), vid(x, y + 1)]);
+        patches.push([x, y]);
+        meshFaceUV.push([[x, y], [x + 1, y], [x + 1, y + 1], [x, y + 1]]);
+      }
+    B.cells = { faces, patches, P };
+    B.meshFaces = faces;
+    B.meshFaceUV = meshFaceUV;
+    B.plate = [
+      { k: "plate.surface", t: "D\u00B2", edit: "surface" },
+      { k: "plate.mesh", t: nx + "\u00D7" + ny + " square", edit: "mesh" },
+      { k: "plate.V", t: "V " + B.adj.length, edit: "scale" },
+      { k: "plate.chi", t: "\u03C7 1" },
+      { k: "plate.boundary", t: "\u2202 1" },
       { k: "plate.deg", t: "deg " + degText(B.adj) },
     ];
   }
@@ -309,12 +393,13 @@ function deriveBoard(B, mode) {
       return out;
     };
   } else {                                     // torus / möbius: cover coords
-    const P = B._P, N = B._N, wrapY = B._wrapY, flipX = B._flipX;
+    const P = B._P, N = B._N;
+    const wrapX = B._wrapX, wrapY = B._wrapY, flipX = B._flipX;
     const uvVert = B.uv;
     const uvEdge = cx.edges.map(([a, b]) => {
       const [x1, y1] = uvVert[a];
       const [x2, y2] = coverRep(x1, y1, uvVert[b][0], uvVert[b][1],
-                                B.nx, B.ny, true, wrapY, flipX);
+                                B.nx, B.ny, wrapX, wrapY, flipX);
       return [(x1 + x2) / 2, (y1 + y2) / 2];
     });
     const uvFace = B.meshFaceUV.map(uvs => {
@@ -330,7 +415,7 @@ function deriveBoard(B, mode) {
     B.edgeCurve = (a, b, S) => {
       const [x1, y1] = uvSite[a];
       const [x2, y2] = coverRep(x1, y1, uvSite[b][0], uvSite[b][1],
-                                B.nx, B.ny, true, wrapY, flipX);
+                                B.nx, B.ny, wrapX, wrapY, flipX);
       const out = [];
       for (let s = 0; s <= S; s++) {
         const t = s / S;
@@ -428,6 +513,17 @@ function buildSurfaceMesh(B) {
     const mat = new THREE.MeshLambertMaterial({ color: INK.faceLo,
       polygonOffset: true, polygonOffsetFactor: 2, polygonOffsetUnits: 2 });
     return new THREE.Mesh(geo, mat);
+  }
+  if (B.kind === "plane") {
+    const pad = B._sp * 0.9;
+    const geo = new THREE.PlaneGeometry((B.nx - 1) * B._sp + 2 * pad,
+                                        (B.ny - 1) * B._sp + 2 * pad);
+    const mat = new THREE.MeshLambertMaterial({ color: INK.faceLo,
+      side: THREE.DoubleSide,
+      polygonOffset: true, polygonOffsetFactor: 2, polygonOffsetUnits: 2 });
+    const m = new THREE.Mesh(geo, mat);
+    m.position.z = -0.012;
+    return m;
   }
   if (B.kind === "torus" || B.kind === "mobius") {
     const nu = B.nx * 8, nv = 24;
@@ -547,9 +643,7 @@ function buildCellMesh(B) {
         for (let j = 0; j < SUB; j++) {
           const q = (a, b) => {
             const p = B.cells.P(x + a / SUB, y + b / SUB);
-            const n = B.kind === "torus"
-              ? torusNormal(x + a / SUB, y + b / SUB, B.nx, B.ny)
-              : mobiusNormal(x + a / SUB, y + b / SUB, B.nx, B.ny, MOB.R, MOB.w);
+            const n = B._N(x + a / SUB, y + b / SUB);
             return [p[0] + n[0] * 0.012, p[1] + n[1] * 0.012,
                     p[2] + n[2] * 0.012];
           };
@@ -893,6 +987,8 @@ const EXPLAIN = {
       b: "The quotient of a rectangle with opposite sides glued, no flips. Closed, orientable, genus 1, \u03C7 = 0, \u2202 = 0. The board is vertex-transitive: every point is equivalent, so there are no corners, no edges, no hoshi \u2014 opening theory must start from pure symmetry. Chains and ladders wrap around both ways." };
     if (s === "mobius") return { t: "M\u00B2 \u2014 the M\u00F6bius band",
       b: "Glue the left and right edges of a rectangle with a flip: the result is one-sided and non-orientable, \u03C7 = 0, with exactly one boundary circle (\u2202 = 1) of twice the apparent length. A chain crossing the seam comes back mirrored \u2014 what looks like two rims is a single connected edge. The brass rim dots mark the boundary points (fewer liberties)." };
+    if (s === "plane") return { t: "D\u00B2 \u2014 the disk (the classical board)",
+      b: "A square region of the plane, no gluing: \u03C7 = 1, one boundary circle (\u2202 = 1). This is the board Go was born on, and its topology is the tamest here \u2014 contractible, so all the strategic texture comes from the boundary: corners are cheapest to enclose (two sides come free), then edges, then the open center. Play it against any closed surface above to feel how much of classical opening theory is really a theory of \u2202." };
     return { t: "I\u00B3 \u2282 E\u00B3 \u2014 a 3-dimensional box",
       b: "Go on a solid cubic lattice. Interior points have six neighbors \u2014 capturing a lone stone in open space takes six moves \u2014 while the 8 corners (brass) have only three liberties. Nothing in the rules changes: the engine only ever sees the adjacency graph, whatever its dimension." };
   },
@@ -910,6 +1006,8 @@ const EXPLAIN = {
       b: "A hexagonal tiling (built as a brick wall: vertical bonds on alternating columns). Every interior vertex has degree 3, so every stone starts with three liberties \u2014 sharp, fragile, first-line Go everywhere. Wrapping a honeycomb imposes parity conditions: even side lengths across plain seams, and odd height across the M\u00F6bius flip \u2014 the Klein bottle refuses it outright." };
     if (s === "box") return { t: "cubic lattice",
       b: "\u2124\u00B3 restricted to an n\u00D7n\u00D7n box: the three-dimensional analogue of the square grid. Degree 6 in the interior, 5 on faces, 4 on edges, 3 at corners." };
+    if (s === "plane") return { t: "square grid \u2014 the classical goban",
+      b: "A patch of \u2124\u00B2 with no gluing at all: 4 liberties inside, 3 on the sides, 2 at the corners \u2014 the liberty gradient that makes corners the cheapest territory and drives all classical opening theory. 9\u00D79, 13\u00D713 and 19\u00D719 are the traditional teaching, club and tournament sizes; the brass rim marks the boundary points. Every other board in this app is an answer to the question: what happens to Go when this edge is glued away, twisted, or curved?" };
     return { t: "square grid \u2014 degree 4",
       b: "The classical goban lattice, glued according to the chosen surface. Four liberties per interior point." };
   },
@@ -927,6 +1025,12 @@ const EXPLAIN = {
       b = "\u03C7 = V \u2212 E + F = " + V + " \u2212 " + E +
           " + " + F + " = 2. The Euler characteristic is a topological invariant \u2014 refine the mesh however you like, it never changes. \u03C7 = 2 is what forces the defects: a perfectly regular degree-6 (or 4, or 3) mesh can only exist at \u03C7 = 0." +
           (M ? " The formula is evaluated on the underlying mesh; the sites you are playing on are its " + B.siteMode + ", a derived graph drawn on the same surface \u2014 so \u03C7 is untouched." : "");
+    } else if (B.kind === "plane") {
+      const V = M ? M.nV : B.adj.length;
+      const E = M ? M.nE : B.edges.length;
+      const F = M ? M.nF : B.meshFaces.length;
+      b = "\u03C7 = V \u2212 E + F = " + V + " \u2212 " + E + " + " + F +
+          " = 1. The disk is contractible \u2014 topologically trivial \u2014 so unlike the sphere it forces no curvature defects, and unlike the flat quotients it isn't closed. What it has instead is a boundary, and on this board the boundary is the whole story: every strategic asymmetry of classical Go (corner, side, center) is a distance-to-\u2202 effect, not a \u03C7 effect.";
     } else {
       b = "\u03C7 = 0: the torus, M\u00F6bius band and Klein bottle are the flat surfaces." +
           (M ? " Check it on this very mesh: V \u2212 E + F = " + M.nV + " \u2212 " + M.nE + " + " + M.nF + " = " + (M.nV - M.nE + M.nF) + "." : "") +
