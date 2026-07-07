@@ -1,4 +1,3 @@
-*Determine the best way to implement the game Geodesics™️:
 The game of Go topologically abstracted. Primitive game rules apply, but connectivity of the board and
 geodesic lines generalized and player defined. Algebraic topological primitives (sphere, Möbius, plane, annulus) and discretization of the space, mesh irregular (combinatorial complex) or regular (voronoi, grid, triangulation, hexagonal, …) determine the connectivity and geodesics. Board complexity is proportional to players’ skill. Game play primitives are the same: connected bodies are living, remove liberties of an opponents pieces kills those pieces, two eyes make a living body, connectivity geodesics of a body dependence on a specific games instantiation. *
 
