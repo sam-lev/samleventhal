@@ -95,7 +95,11 @@ class MCTS:
 
         for _ in range(sims):
             node, key, path = root, root_key, []
-            while True:
+            seen = {root_key}                  # positional-superko guard:
+            while True:                        # a repeated state in one descent
+                if len(path) > 4 * self.n:     # is a ko cycle; score it a draw
+                    value = 0.0
+                    break
                 total = node["N"].sum()
                 U = self.c * node["P"] * math.sqrt(total + 1) / (1 + node["N"])
                 Q = np.where(node["N"] > 0,
@@ -104,6 +108,10 @@ class MCTS:
                 a = int(np.argmax(score))
                 path.append((node, a))
                 key = self._step(key, a)
+                if key in seen:
+                    value = 0.0
+                    break
+                seen.add(key)
                 child = self.nodes.get(key)
                 if child is None:
                     child = self._expand(key)
