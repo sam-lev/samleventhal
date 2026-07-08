@@ -236,5 +236,97 @@ function seamCheck(B, tol) {
   ok(old.s.length === 3, "legacy 3-element codes still decode");
 }
 
+
+// ---------- boot smoke: execute the BUILT page end-to-end -----------------------
+// This is the test that guards against exactly one class of shipping accident:
+// a page that parses but dies at boot (e.g. a call to a function a bad merge
+// removed). It runs every inline script block of ../geodesics.html in order
+// inside a stub DOM, with a live bridge server on the side, and asserts the
+// board state exists, no block threw, and the remote engine round-trip
+// completed all the way into the Opponent menu.
+{
+  const { readFileSync } = await import("node:fs");
+  const vm = await import("node:vm");
+  const { spawn } = await import("node:child_process");
+  const path = await import("node:path");
+  const html = readFileSync(new URL("../geodesics.html", import.meta.url), "utf8");
+  const blocks = [...html.matchAll(/<script>([\s\S]*?)<\/script>/g)].map(m => m[1]);
+
+  const Anything = new Proxy(function () {}, {
+    get(t, p) {
+      if (p === Symbol.toPrimitive) return () => 0;
+      if (p === Symbol.iterator) return function* () {};
+      if (p === "then" || p === "toJSON") return undefined;
+      if (p === "length" || p === "count") return 0;
+      return Anything;
+    },
+    set() { return true; },
+    apply() { return Anything; },
+    construct() { return Anything; },
+  });
+  const elements = new Map();
+  const makeEl = (id) => ({
+    id, style: {}, dataset: {}, children: [], _html: "",
+    get innerHTML() { return this._html; },
+    set innerHTML(v) { this._html = String(v); },
+    textContent: "", value: "", hidden: false, disabled: false,
+    clientWidth: 800, clientHeight: 600, width: 800, height: 600,
+    classList: { add() {}, remove() {}, toggle() {}, contains: () => false },
+    addEventListener() {}, removeEventListener() {},
+    appendChild(c) { this.children.push(c); return c; },
+    removeChild() {}, setAttribute() {}, getAttribute: () => null,
+    querySelector: () => makeEl("q"), querySelectorAll: () => [],
+    getBoundingClientRect: () => ({ left: 0, top: 0, width: 800, height: 600 }),
+    getContext: () => Anything, focus() {}, blur() {}, select() {},
+    setPointerCapture() {}, releasePointerCapture() {},
+  });
+  const sandbox = {
+    console, setTimeout, clearTimeout, setInterval, clearInterval,
+    performance: { now: () => Date.now() },
+    requestAnimationFrame: () => 0, cancelAnimationFrame() {},
+    addEventListener() {}, removeEventListener() {}, dispatchEvent() {},
+    alert() {}, confirm: () => true,
+    devicePixelRatio: 1,
+    location: { hash: "", href: "http://localhost/geodesics.html" },
+    history: { replaceState() {} },
+    navigator: { clipboard: { writeText: async () => {} } },
+    document: {
+      getElementById: (id) => (elements.has(id) ? elements.get(id)
+        : (elements.set(id, makeEl(id)), elements.get(id))),
+      createElement: (tag) => makeEl(tag),
+      addEventListener() {}, removeEventListener() {},
+      body: makeEl("body"), documentElement: makeEl("html"),
+      execCommand: () => true,
+    },
+    THREE: Anything,
+    WebSocket: globalThis.WebSocket,          // real socket: full-stack bridge test
+    Int8Array, Float32Array, Float64Array, Uint32Array, Uint8Array,
+    Math, JSON, Promise, Map, Set, Array, Object,
+  };
+  sandbox.window = sandbox; sandbox.self = sandbox; sandbox.globalThis = sandbox;
+  vm.createContext(sandbox);
+
+  const serveDir = path.resolve(path.dirname(new URL(import.meta.url).pathname), "..", "bridge");
+  const serve = spawn("python3", ["serve.py", "8765"], { cwd: serveDir, stdio: "ignore" });
+  await new Promise(r => setTimeout(r, 700));
+
+  let bootErr = null;
+  try {
+    for (const src of blocks) vm.runInContext(src, sandbox, { timeout: 30000 });
+  } catch (e) { bootErr = e; }
+  ok(!bootErr, "boot smoke: every inline block of the built page executes " +
+     "without throwing" + (bootErr ? " -- " + bootErr.message : ""));
+  ok(sandbox.GeoAI && sandbox.GeoAI.models.some(m => m.id === "random"),
+     "boot smoke: model registry populated inside the page");
+
+  await new Promise(r => setTimeout(r, 1500));
+  const remote = sandbox.GeoAI && sandbox.GeoAI.models.find(m => m.id === "rx-py-random");
+  const menu = elements.get("opponent");
+  ok(!!remote && !!menu && menu._html.includes("rx-py-random"),
+     "boot smoke: bridge client connected to a live server and the remote " +
+     "engine reached the Opponent menu");
+  serve.kill();
+}
+
 console.log(`\n${passed} passed, ${failed} failed`);
 process.exit(failed ? 1 : 0);

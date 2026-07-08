@@ -1013,6 +1013,114 @@ function aiMove() {
   else apply(r);
 }
 
+// ---------- bridge: local engines over a WebSocket -----------------------------
+// Run `python3 bridge/serve.py` beside the app; every bot it advertises
+// appears in the Opponent menu (and vanishes when the socket drops). Requests
+// are stateless: full stones, legal mask, move history and adjacency go out,
+// a single vertex index (or -1 for pass) comes back. Legality stays with the
+// host Engine regardless of what the remote answers. See bridge/README.md.
+
+const BRIDGE_URL =
+  (typeof window !== "undefined" && window.GEO_BRIDGE_URL) ||
+  "ws://127.0.0.1:8765";
+const bridge = { ws: null, next: 1, pending: new Map(), models: [], timer: null };
+
+function bridgeRemoveModels() {
+  if (!bridge.models.length) return;
+  GeoAI.models = GeoAI.models.filter(m => !m.remote);
+  bridge.models = [];
+  refreshOpponentOptions();          // falls back to human if selection vanished
+}
+
+function bridgeEngine(modelId, level) {
+  return {
+    pickMove(stones, color, opts) {
+      if (!bridge.ws || bridge.ws.readyState !== 1)
+        return Promise.reject(new Error("bridge offline"));
+      const id = bridge.next++;
+      const B = state.B;
+      const req = {
+        type: "genmove", id, model: modelId, level: level || "standard",
+        spec: { surface: state.surface, mesh: state.mesh,
+                scaleIdx: state.scaleIdx, incidence: state.incidence,
+                nx: B.nx || 0, ny: B.ny || 0 },
+        board: {
+          n: B.adj.length,
+          neighbors: B.adj,
+          stones: Array.from(stones),
+          toMove: color,
+          legalMask: Array.from(opts && opts.legalMask || []),
+          moves: state.eng.moves.map(mv => [mv[0], mv[1] === null ? -1 : mv[1]]),
+        },
+      };
+      return new Promise((resolve, reject) => {
+        bridge.pending.set(id, { resolve, reject });
+        try { bridge.ws.send(JSON.stringify(req)); }
+        catch (e) { bridge.pending.delete(id); reject(e); return; }
+        setTimeout(() => {
+          if (bridge.pending.has(id)) {
+            bridge.pending.delete(id);
+            reject(new Error("bridge timeout"));
+          }
+        }, 120000);
+      });
+    },
+  };
+}
+
+function bridgeConnect() {
+  if (typeof WebSocket === "undefined") return;
+  let ws;
+  try { ws = new WebSocket(BRIDGE_URL); } catch (e) { return bridgeRetry(); }
+  bridge.ws = ws;
+  ws.onopen = () => ws.send(JSON.stringify({ type: "hello", app: "geodesics" }));
+  ws.onmessage = (ev) => {
+    let m;
+    try { m = JSON.parse(ev.data); } catch (e) { return; }
+    if (m.type === "models") {
+      bridgeRemoveModels();
+      for (const spec of m.models || []) {
+        const entry = {
+          id: "rx-" + spec.id,
+          name: spec.name || spec.id,
+          levels: (spec.levels && spec.levels.length) ? spec.levels : ["standard"],
+          supports: spec.supports || null,
+          remote: true,
+          create: (nb, opts) => bridgeEngine(spec.id, opts && opts.level),
+        };
+        GeoAI.models.push(entry);
+        bridge.models.push(entry);
+      }
+      refreshOpponentOptions();
+      if (bridge.models.length)
+        message("bridge connected \u2014 " + bridge.models.length + " engine" +
+          (bridge.models.length > 1 ? "s" : "") + " available", 3800);
+    } else if (m.type === "move" && bridge.pending.has(m.id)) {
+      const p = bridge.pending.get(m.id);
+      bridge.pending.delete(m.id);
+      p.resolve({ move: m.move, reason: m.info || "bridge" });
+    } else if (m.type === "error" && bridge.pending.has(m.id)) {
+      const p = bridge.pending.get(m.id);
+      bridge.pending.delete(m.id);
+      p.reject(new Error(m.message || "bridge error"));
+    }
+  };
+  ws.onclose = () => {
+    for (const p of bridge.pending.values())
+      p.reject(new Error("bridge closed"));
+    bridge.pending.clear();
+    bridge.ws = null;
+    bridgeRemoveModels();
+    bridgeRetry();
+  };
+  ws.onerror = () => { try { ws.close(); } catch (e) { /* noop */ } };
+}
+
+function bridgeRetry() {
+  if (bridge.timer) return;
+  bridge.timer = setTimeout(() => { bridge.timer = null; bridgeConnect(); }, 4000);
+}
+
 // ---------- explanations (hover \u24D8, right-click / long-press) ----------------
 
 function fmtHist(adj) {
@@ -1441,5 +1549,6 @@ try {
   else syncHash();
 } catch (e) { /* no hash in sandbox */ }
 group.rotation.x = 0.35; group.rotation.y = -0.5;
-bridgeConnect();
 (function loop() { requestAnimationFrame(loop); renderer.render(scene, camera); })();
+try { bridgeConnect(); }              // optional: never allowed to break boot
+catch (e) { console.warn("bridge unavailable:", e); }
