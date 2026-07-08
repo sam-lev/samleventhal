@@ -25,7 +25,7 @@ import numpy as np
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from env import LOWEST, SPECS, board_for, new_game, play_game, random_agent  # noqa
-from hatz import HATZ, Bundle, final_ownership                               # noqa
+from hatz import HATZ, Bundle, co_ownership_targets, final_ownership                               # noqa
 from mcts import MCTS, policy_target                                         # noqa
 
 HERE = os.path.dirname(os.path.abspath(__file__))
@@ -65,9 +65,11 @@ def self_play_game(net, key, boards, sims, seed, rng, gauge_aug,
     winner = game.score()["winner"]
     z = {"B": 1, "W": 2}.get(winner)
     own_black = final_ownership(board, game.colors)
+    eown = co_ownership_targets(bundle, own_black)   # perspective-invariant
     for r in records:
         r["z"] = 0.0 if z is None else (1.0 if r["player"] == z else -1.0)
         r["own"] = own_black if r["player"] == 1 else -own_black
+        r["eown"] = eown
     return records, winner, move_no
 
 
@@ -127,7 +129,7 @@ def main():
         b = board_for(k)
         boards[k] = (b, Bundle(b, SPECS[k][0]))
     net = HATZ(hidden=args.hidden, layers=args.layers, seed=args.seed)
-    net.meta = {"arch": "hatz", "specs": keys,
+    net.meta = {"arch": "hatz", "version": 2, "specs": keys,
                 "surfaces": sorted({SPECS[k][0] for k in keys}),
                 "meshes": sorted({SPECS[k][1] for k in keys})}
     buf = deque(maxlen=args.buffer)
@@ -159,7 +161,8 @@ def main():
             for r in batch:
                 _, _, _, C = net.forward(gauged[r["key"]], r["stones"],
                                          r["to_move"], r["mask"])
-                total += net.backward(C, r["pi"], r["z"], r["own"], grads)
+                total += net.backward(C, r["pi"], r["z"], r["own"], grads,
+                                      eown_t=r["eown"])
             for k2 in grads:
                 grads[k2] /= len(batch)
             net.adam_step(grads, lr=args.lr)

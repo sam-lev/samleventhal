@@ -99,6 +99,18 @@ KataGo-style global pooling.
     python3 train_hatz.py --specs mobius,klein,rp2 --iters 100
     python3 train_hatz.py --iters 150        # all lowest topologies
 
+**v2 (the joint synthesis):** the pooling Morse function is now the
+network's own mid-depth ownership prediction (supervised, not relaxed;
+regions = connected components of its interlevel sets, exactly
+automorphism-equivariant — basin partitions with index tie-breaks are
+not, a failure our tests caught on chiral Mobius plateaus); a GIN-eps
+edge head supervised by endpoint co-ownership defines nested filtration
+levels (0.75 / 0.5 / full) with per-node attention across them, per the
+homophily-filtration methodology; and the eps-conditioned transport maps
+are orthogonal via Cayley parameterization. Loss = policy CE + value +
+final/mid ownership + co-ownership BCE. All gradients hand-derived and
+numerically verified (worst 6e-06 over every parameter).
+
 Served by `bridge/bots/hatz_mini.py` (the bot reconstructs the seam from
 nx/ny on remote boards and reports "non-orientable seam active"). Known v1
 gaps: no continuous SO(2) part (isotropic aggregation), gauge invariance is

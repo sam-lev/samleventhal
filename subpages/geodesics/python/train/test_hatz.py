@@ -57,15 +57,24 @@ def gradcheck(bundle):
     pi = rng.random(n + 1) * mask
     pi /= pi.sum()
     z_t, own_t = 0.4, rng.uniform(-1, 1, n)
+    eown_t = (rng.random(len(bundle.edges)) > 0.5).astype(float)
+    _, _, _, C0 = net.forward(bundle, stones, 1, mask)
+    frozen = {"mats": C0["mats"],
+              "msc": (C0["msc"]["S"], C0["msc"]["P"], C0["msc"]["Ar"])}
     grads = net.zero_grads()
-    _, _, _, C = net.forward(bundle, stones, 1, mask)
-    net.backward(C, pi, z_t, own_t, grads)
+    _, _, _, C = net.forward(bundle, stones, 1, mask, frozen=frozen)
+    net.backward(C, pi, z_t, own_t, grads, eown_t=eown_t)
 
     def loss_at():
-        _, _, _, c = net.forward(bundle, stones, 1, mask)
-        return (-float(np.sum(pi * np.log(c["probs"] + 1e-12)))
-                + (z_t - c["value"]) ** 2
-                + 0.5 * float(np.mean((c["own"] - own_t) ** 2)))
+        _, _, _, c = net.forward(bundle, stones, 1, mask, frozen=frozen)
+        p_, v, o = c["probs"], c["value"], c["own"]
+        om, phi = c["msc"]["own_mid"], c["phi"]
+        return (-float(np.sum(pi * np.log(p_ + 1e-12))) + (z_t - v) ** 2
+                + 0.5 * float(np.mean((o - own_t) ** 2))
+                + 0.25 * float(np.mean((om - own_t) ** 2))
+                + 0.25 * float(np.mean(
+                    -eown_t * np.log(phi + 1e-12)
+                    - (1 - eown_t) * np.log(1 - phi + 1e-12))))
 
     h, worst = 1e-5, 0.0
     for k, w in net.p.items():
@@ -86,8 +95,13 @@ def gradcheck(bundle):
 
 
 w1 = gradcheck(bundles["mobius"])
-ok(w1 < 1e-4, f"gradcheck mobius (seam transport + MSC pooling + ownership): "
-   f"worst rel err {w1:.1e}")
+ok(w1 < 1e-4, "gradcheck mobius (Cayley transport + filtration attention + "
+   f"GIN filter + ownership-driven MSC): worst rel err {w1:.1e}")
+from hatz import cayley                                          # noqa: E402
+_netO = HATZ(hidden=8, layers=2, seed=1)
+_W, _, _ = cayley(_netO.p["T00"])
+ok(float(np.abs(_W.T @ _W - np.eye(8)).max()) < 1e-12,
+   "Cayley eps-transport maps are orthogonal to machine precision")
 from geodesics.board import Board                               # noqa: E402
 tetra = Board(name="tetra", params={},
               adj=((1, 2, 3), (0, 2, 3), (0, 1, 3), (0, 1, 2)),
@@ -96,7 +110,7 @@ tetra = Board(name="tetra", params={},
 bt = Bundle(tetra)
 w2 = gradcheck(bt)
 ok(w2 < 1e-4 and abs(bt.curv[0] - np.pi) < 1e-9,
-   f"gradcheck tetrahedron (V-E-F coupling; Gauss-Bonnet defect = pi): "
+   "gradcheck tetrahedron (V-E-F + all v2 paths; Gauss-Bonnet defect = pi): "
    f"worst rel err {w2:.1e}")
 
 # ---- equivariance claims -------------------------------------------------------

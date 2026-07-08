@@ -37,20 +37,26 @@ architecture plays it optimally. We present a first implementation of a
 self-play agent whose network (i) carries the reflection ($\ZZ_2$) part of
 the gauge structure that non-orientable surfaces provably require, via an
 orientation cocycle computed from the board's combinatorics and
-sheaf-style transport maps conditioned on it; (ii) is exactly equivariant
+orthogonal (Cayley-parameterized) sheaf-style transport maps conditioned
+on it; (ii) is exactly equivariant
 to each board's automorphism group by construction, replacing the dihedral
-data augmentation that has no analogue off the square grid; (iii) pools
-through a Morse--Smale multi-persistence hierarchy of the position's
-influence field, a canonical topology-grounded coarsening; and (iv) reads
+data augmentation that has no analogue off the square grid; (iii) pools through interlevel-set components of its \emph{own predicted
+ownership field} --- a learned Morse function whose partition is shaped by
+supervision rather than differentiable relaxation; (iv) laterally
+decomposes each position through an outcome-supervised edge filtration
+(a GIN-$\eps$ head predicting endpoint co-ownership) with per-node
+attention across filtration levels; and (v) reads
 the board as a cell complex, passing messages over vertex--edge--face
 incidences with curvature and localized-homology inputs and an ownership
 auxiliary head. The network is small ($3.5\times 10^4$ parameters),
 dependency-free, and every gradient is hand-derived and numerically
 verified. We verify the orientation cocycle against ground-truth
 orientability on eleven board types, demonstrate machine-precision
-equivariance, and report two self-play pathologies specific to this
-setting (transposition-table ko cycles; a degenerate early-pass
-equilibrium under Tromp--Taylor scoring) together with their remedies. To
+equivariance, and report three pathologies specific to this setting --- transposition-table
+ko cycles, a degenerate early-pass equilibrium under Tromp--Taylor
+scoring, and the failure of index-based tie-breaking (simulation of
+simplicity) to respect board symmetries when the Morse function is
+learned --- together with their remedies. To
 our knowledge this is the first game-playing agent on non-orientable
 boards; a full transfer and ablation study is specified and in progress.
 \end{abstract}
@@ -100,14 +106,26 @@ the answer. Our contributions:
   (\S\ref{sec:equivariance}). This replaces dataset-specific augmentation
   with intrinsic symmetry, with the strict generalization benefit of
   equivariance~\cite{elesedy2021}.
-\item \textbf{Morse--Smale multi-persistence pooling.} The ascending and
-  descending basin hierarchy of the position's diffused influence
-  field~\cite{leventhal2022} segments the board into
-  territories-and-frontiers; we use it as a position-dependent,
-  parameter-independent pooling operator inside the network --- a
-  canonical, topology-grounded coarsening where learned pooling such as
-  DiffPool~\cite{ying2018diffpool} only approximates one, and one through
-  which backpropagation remains exact (\S\ref{sec:msc}).
+\item \textbf{Ownership-driven topological pooling.} The scalar field
+  whose level structure defines the pooling regions is the network's own
+  mid-depth ownership prediction --- a \emph{learned, supervised} Morse
+  function, following the hierarchical-segmentation program
+  of~\cite{leventhal2022}. Regions are the connected components of its
+  interlevel sets (Black-leaning, contested, White-leaning), a
+  position-dependent, parameter-independent operator through which
+  backpropagation stays exact, and --- unlike basin partitions with
+  simulation-of-simplicity tie-breaking --- one that is exactly
+  automorphism-equivariant (\S\ref{sec:msc}).
+\item \textbf{Outcome-supervised filtration levels.} Following the
+  homophily-filtration methodology of the companion
+  manuscript~\cite{leventhal2025filtration} and graph filtration
+  learning~\cite{hofer2020}, a GIN-$\eps$ edge head predicts endpoint
+  \emph{co-ownership} --- Go heterophily is literal: contact fights are
+  heterophilous edges --- and fixed thresholds over it produce nested
+  edge-filtered levels (chain cores $\to$ contested full graph). Message
+  passing runs per level with learned per-node attention across levels,
+  so gradients reach the filter through supervision and attention while
+  the masks themselves stay combinatorial (\S\ref{sec:filtration}).
 \item \textbf{A cell-complex, ownership-supervised value/policy net} with
   curvature (angle-defect) and localized-homology inputs, KataGo-style
   global pooling, and an ownership head; $3.5\times 10^4$ parameters,
@@ -242,9 +260,17 @@ restriction maps conditioned on the cocycle,
 \begin{equation}
 m_v \;=\; \tfrac{1}{|N(v)|}\!\!\sum_{u\in N(v)}\!\big(W_0 +
 \eps(u,v)\,W_1\big)\,h_u
-\;=\; W_0\,(A h)_v \;+\; W_1\,(A_\eps h)_v,
+\;=\; \big((A h)\,W_0\big)_v \;+\; \big((A_\eps h)\,W_1\big)_v,
+\qquad W_0, W_1 \in O(D),
 \label{eq:transport}
 \end{equation}
+with orthogonality enforced by the Cayley parameterization
+$W = (I-\Lambda)(I+\Lambda)^{-1}$, $\Lambda = T - T^\top$ for a raw
+parameter $T$ (backward pass derived in closed form and verified
+numerically). Orthogonal restriction maps make the transport
+norm-preserving --- genuine discrete parallel transport rather than
+arbitrary mixing --- tightening the correspondence with connection
+sheaves.
 where $A$ is the row-normalized adjacency and $A_\eps$ its
 $\eps$-signed counterpart. Crossing the orientation seam therefore
 applies a different learned map --- the mechanism by which neural sheaf
@@ -265,6 +291,31 @@ train with \emph{gauge augmentation}: each self-play game and each
 optimization step resamples $g$ uniformly and uses
 $\eps'(u,v)=g(u)\eps(u,v)g(v)$, teaching the invariance the architecture
 does not yet guarantee.
+
+\subsection{Outcome-supervised filtration levels}
+\label{sec:filtration}
+Adjacent opposite-colored stones are heterophilous edges in the literal
+game-theoretic sense: contact fights concentrate heterophily, chains are
+homophilous cores. We port the homophily-based filtration methodology
+of~\cite{leventhal2025filtration} with class labels replaced by game
+outcomes. A GIN-$\eps$ head~\cite{xu2019gin,hofer2020} over the input
+embedding produces a symmetric per-edge filter
+$\phi(u,v)=\sigma(\mathrm{MLP}[g_u{+}g_v;\,|g_u{-}g_v|])$ supervised by
+\emph{co-ownership}: whether the endpoints are owned by the same player
+under final Tromp--Taylor scoring (targets $1$ / $0$ / $0.5$ for
+same/opposite/neutral). Fixed thresholds $(0.75, 0.5, \text{full})$ give
+nested edge subsets --- predicted chain cores through the contested full
+graph. The transport of Eq.~\ref{eq:transport} runs \emph{per level}
+(the twisted aggregation matrices simply restrict to each kept edge set,
+so gauge structure and equivariance are untouched), and levels combine by
+per-node attention
+$h_v = \sum_\ell \alpha_{v,\ell}\, m^{(\ell)}_v$,
+$\alpha_{v}=\mathrm{softmax}_\ell(m^{(\ell)}_v \cdot a_\ell)$,
+generalizing the filtration attention of~\cite{leventhal2025filtration}.
+Gradients reach the filter through its supervision and through the
+attention weights --- always differentiable --- while the level masks
+themselves are combinatorial structure: supervised, not relaxed, which
+sidesteps the piecewise-constant-membership problem entirely.
 
 \subsection{Cell ranks and inputs}
 \label{sec:net}
@@ -289,31 +340,48 @@ form), and global scalars $[\,\mathbf{1}[w_1\neq 0],\ \chi/|V|\,]$.
 Heads: a per-vertex policy logit plus a pooled pass logit; a pooled
 $\tanh$ value; and a per-vertex $\tanh$ \emph{ownership} head supervised
 by final Tromp--Taylor territory, KataGo's auxiliary target adapted to
-graphs. Total: $34{,}916$ parameters at width $32\times 3$ layers ---
-$\sim\!140$\,KB, comfortably client-side. All gradients are hand-derived
-in \texttt{numpy}; central-difference verification over every parameter
-gives worst relative error $4.5\times10^{-6}$ (M\"obius: seam transport
-$+$ pooling $+$ ownership) and $5.8\times10^{-7}$ (tetrahedron: full
-vertex--edge--face coupling).
+graphs. The ownership head is applied twice with shared weights: at mid-depth
+(where its prediction becomes the pooling Morse function) and at the
+output, both supervised. Total: $38{,}341$ parameters at width
+$32\times3$ layers --- $\sim\!150$\,KB, comfortably client-side. All
+gradients are hand-derived in \texttt{numpy}, including the Cayley
+inverse, the per-node attention softmax, and the filter head;
+central-difference verification over every parameter (with position
+structure frozen, since it is deliberately stop-grad) gives worst
+relative error $4.3\times10^{-7}$ (M\"obius) and $6.0\times10^{-6}$
+(tetrahedron), and $\|W^\top W - I\|_\infty = 6.7\times10^{-16}$ for the
+transported maps.
 
-\subsection{Morse--Smale multi-persistence pooling}
+\subsection{Ownership-driven topological pooling}
 \label{sec:msc}
-Let $f_0$ be the two-step mean-diffused stone field of the position. Its
-ascending and descending basin partitions --- computed by the same
-union-find persistence hierarchy that drives our earlier hierarchical
-GNN~\cite{leventhal2022} and, incidentally, the game's built-in engine
---- segment the board into influence basins joined at separatrices, a
-decomposition that is Go-semantic (territories and contested frontiers)
-and respects the surface's critical structure. At a persistence quantile
-we form regions $r$, the one-hot assignment $S\in\{0,1\}^{|V|\times R}$,
-mean-pool $P$, region adjacency $A_r$, and insert after the first layer
-\begin{equation}
-Z = \mathrm{relu}\big((P H_V) W_p + (A_r P H_V) W_r\big),\qquad
-H_V \leftarrow H_V + (S Z)\,W_u .
-\end{equation}
-The segmentation depends on the \emph{position}, not on parameters, so
-$S,P,A_r$ are constants of each forward pass and backpropagation through
-the block is exact --- a guarantee learned pooling lacks.
+The coarsening rung uses a \emph{learned} Morse function: the mid-depth
+ownership prediction $\hat o$. Regions are the connected components of
+its interlevel sets $\{\hat o \ge t\}$, $\{|\hat o| < t\}$,
+$\{\hat o \le -t\}$ at the median-$|\hat o|$ threshold --- predicted
+Black territory, contested frontier, predicted White territory, the
+sublevel-set objects native to persistence. Features mean-pool to
+regions, message-pass once on the region graph, and unpool residually.
+The partition depends on the position and on $\hat o$ but is treated as
+stop-grad structure; the field is shaped by its own supervision
+(``supervised, not relaxed''), so backpropagation through the block is
+exact.
+
+We initially used the ascending/descending \emph{basin} partition
+of~\cite{leventhal2022}, and our equivariance tests caught a failure
+worth recording: with a learned field, symmetric positions produce
+value \emph{plateaus}, and the index-based tie-breaking (simulation of
+simplicity) that discrete Morse theory uses for genericity then splits
+them arbitrarily --- on the empty geodesic sphere the twelve equal
+pentavalent maxima carved the board into twelve index-dependent basins,
+and on the M\"obius band two \emph{chiral twin} seam-corner plateaus,
+exchanged by the band's reflection, merged through different union-find
+chains. Simultaneous merging of equal-persistence families repairs the
+first case but not the second. Interlevel-set components repair the
+class: components map to components under any symmetry of the field, so
+the partition is exactly automorphism-equivariant, verified to machine
+precision. Basin/separatrix structure remains in the fixed built-in
+engine, and a differentiable soft-ascent basin variant is a natural
+extension.
 
 \subsection{Equivariance}
 \label{sec:equivariance}
@@ -328,11 +396,13 @@ Each layer is a composition of permutation-equivariant operators
 ($A,A_\eps,M_{\cdot\cdot},S,P$ conjugate by the permutation; pointwise
 nonlinearities and global means commute with it) with shared weights.
 \end{proof}
-Verified to machine precision: the empty-board policy is constant on the
-WL orbits of the geodesic sphere (two orbits: the twelve pentavalent and
-thirty hexavalent vertices; spread $2\times10^{-15}$) and the torus
-(vertex-transitive; spread $0$), and exactly symmetric under the
-seam-preserving M\"obius reflection (spread $0$). On non-orientable
+Verified to machine precision for the full v2 stack (filtration levels,
+attention, Cayley transport, ownership-driven pooling): the empty-board
+policy is constant on the WL orbits of the geodesic sphere and the torus,
+and exactly symmetric under the seam-preserving M\"obius reflection ---
+all spreads at floating-point noise. The filter $\phi$ is symmetric and
+permutation-equivariant by construction, so level masks map to level
+masks under automorphisms. On non-orientable
 boards the \emph{gauge-dependent} remainder --- seam placement --- is the
 component gauge augmentation trains away; we report this rather than
 hide it.
@@ -341,7 +411,12 @@ hide it.
 \label{sec:selfplay}
 Training is standard AlphaZero: PUCT ($c{=}1.5$, Dirichlet root noise),
 visit-count policy targets with temperature $1$ for the first ten moves,
-replay buffer, Adam. Two failures specific to this setting are worth
+replay buffer, Adam. The loss is
+$\mathrm{CE}(\pi, p) + (z-v)^2 + \tfrac12\,\mathrm{MSE}(\hat o_{\rm
+final}) + \tfrac14\,\mathrm{MSE}(\hat o_{\rm mid}) +
+\tfrac14\,\mathrm{BCE}(\phi)$, all targets derived from final
+Tromp--Taylor territory. Gauge augmentation resamples the cocycle per
+game and per optimization step. Two failures specific to this setting are worth
 recording.
 
 \textbf{Transposition ko cycles.} Our search merges states in a
@@ -375,11 +450,11 @@ Gauss--Bonnet consistency of the curvature inputs (tetrahedron defect
 $=\pi$ per vertex); browser/Python adjacency parity edge-for-edge on
 cylinder, Klein, and $\RP^2$ boards; end-to-end training and serving
 (checkpoint $\to$ WebSocket bridge $\to$ browser opponent, including seam
-reconstruction on remote boards). Short training runs on the
-non-orientable trio (M\"obius, Klein, $\RP^2$; 24 simulations, six
-iterations) show healthy optimization after the pass guard
-(loss $3.92\!\to\!2.81$; parity with a random opponent within noise) ---
-reported as smoke evidence, not results.
+reconstruction on remote boards). Short v2 training runs on the non-orientable trio (M\"obius, Klein,
+$\RP^2$; 24 simulations, six iterations) show healthy optimization of
+the five-term loss after the pass guard ($4.20\!\to\!3.39$; parity with
+a random opponent by iteration four) --- reported as smoke evidence, not
+results.
 
 \textbf{Protocol (in progress).} (i) \emph{Zero/few-shot transfer}: train
 on $k$ topologies, evaluate Elo on held-out ones (e.g.\ train
@@ -397,11 +472,13 @@ of~\cite{elesedy2021} in self-play.
 No continuous $SO(2)$ steerability yet (isotropic aggregation over the
 rotation system); gauge invariance is learned, not guaranteed --- a
 strictly equivariant formulation via the orientation double cover is the
-natural next step; persistent-homology inputs are localized proxies
-($H_0$ statistics) rather than diagrams, and $H_1$ features for eyes/ko
-are future work; automorphism groups are used for verification (WL
-orbits) but not yet for target symmetrization; and the empirical study
-above is the actual test of the thesis. A browser export of the network
+natural next step; filtration thresholds are fixed hyperparameters
+rather than learned quantiles; the soft-ascent basin variant that would
+restore separatrix structure differentiably remains future work;
+persistent-homology inputs beyond interlevel components ($H_1$ for
+eyes/ko) are pending; automorphism groups are used for verification, not
+yet target symmetrization; and the empirical study above is the actual
+test of the thesis. A browser export of the network
 is mechanical --- the Morse--Smale machinery already ships in the
 client-side engine --- and would make every trained agent playable with
 no installation.
@@ -455,6 +532,13 @@ arXiv:2106.06020, 2021.
 \bibitem{ying2018diffpool} R.~Ying et al.
 Hierarchical graph representation learning with differentiable pooling.
 \emph{NeurIPS}, 2018.
+\bibitem{hofer2020} C.~Hofer, F.~Graf, B.~Rieck, M.~Niethammer,
+R.~Kwitt. Graph filtration learning. \emph{ICML}, 2020.
+\bibitem{zhu2020} J.~Zhu, Y.~Yan, L.~Zhao, M.~Heimann, L.~Akoglu,
+D.~Koutra. Beyond homophily in graph neural networks. \emph{NeurIPS},
+2020.
+\bibitem{leventhal2025filtration} S.~Leventhal et al. Homophily-based
+filtration learning for graph neural networks. Under review, 2025.
 \bibitem{elesedy2021} B.~Elesedy and S.~Zaidi.
 Provably strict generalisation benefit for equivariant models.
 \emph{ICML}, 2021.

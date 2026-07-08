@@ -59,6 +59,57 @@ import numpy as np
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from hgnn import Kernel, basin_hierarchy  # noqa: E402
 
+
+def _basins_le(f, N1):
+    """basin_hierarchy variant whose label extraction merges persistence
+    <= p (not < p): equal-persistence families — which arise exactly on
+    symmetric positions of a learned field — merge simultaneously, keeping
+    the partition automorphism-equivariant instead of index-tie-broken."""
+    h = basin_hierarchy(f, N1)
+    n = len(f)
+
+    def higher(a, b):
+        return f[a] > f[b] or (f[a] == f[b] and a > b)
+
+    # re-run the union-find to expose pers/merged_into with <= semantics
+    order = sorted(range(n), key=lambda v: (-float(f[v]), -v))
+    parent, cmax = [-1] * n, [-1] * n
+    pers = [float("inf")] * n
+    merged_into = [-1] * n
+
+    def find(x):
+        while parent[x] != x:
+            parent[x] = parent[parent[x]]
+            x = parent[x]
+        return x
+
+    for v in order:
+        parent[v] = v
+        cmax[v] = v
+        for u in N1[v]:
+            if parent[u] == -1:
+                continue
+            ru, rv = find(u), find(v)
+            if ru == rv:
+                continue
+            live, die = ru, rv
+            if higher(cmax[die], cmax[live]):
+                live, die = rv, ru
+            pers[cmax[die]] = float(f[cmax[die]]) - float(f[v])
+            merged_into[cmax[die]] = cmax[live]
+            parent[die] = live
+
+    def labels_at(p):
+        lab = [0] * n
+        for v in range(n):
+            m = h["basin"][v]
+            while merged_into[m] != -1 and pers[m] <= p:
+                m = merged_into[m]
+            lab[v] = m
+        return lab
+
+    return {"finitePers": h["finitePers"], "labelsAt": labels_at}
+
 NONORIENTABLE = {"mobius", "klein", "rp2"}
 
 
@@ -188,6 +239,10 @@ class Bundle:
         eps = orientation_cocycle(board, surface)
         self.eps = eps
         self.A = _mean_matrix(self.adj, n, n)
+        self.Asum = np.zeros((n, n))
+        for v in range(n):
+            for u in self.adj[v]:
+                self.Asum[v, u] = 1.0
         self.Ae = _mean_matrix(self.adj, n, n,
                                signs=lambda v, u: eps[v][u])
         self.nonorientable = any(eps[v][u] < 0
@@ -325,7 +380,28 @@ class Bundle:
 FV, FE, FF, FG = 10, 5, 5, 2
 
 
+def cayley(T):
+    """Orthogonal map from a raw square matrix: W = (I-A)(I+A)^{-1},
+    A = T - T^T skew. Returns (W, A, Q) with Q = (I+A)^{-1} cached for the
+    hand-derived backward pass."""
+    A = T - T.T
+    Q = np.linalg.inv(np.eye(T.shape[0]) + A)
+    return (np.eye(T.shape[0]) - A) @ Q, A, Q
+
+
+def cayley_backward(G, A, Q):
+    """dL/dT given dL/dW for W = (I-A)(I+A)^{-1}."""
+    dA = -G @ Q.T - Q.T @ (np.eye(A.shape[0]) - A).T @ G @ Q.T
+    return dA - dA.T
+
+
 class HATZ:
+    """v2: outcome-supervised filtration levels with per-node attention,
+    ownership-driven Morse-Smale pooling, and Cayley-orthogonal
+    eps-conditioned transport. See module docstring."""
+
+    LEVELS = (0.75, 0.5, None)          # co-ownership thresholds; None = full
+
     def __init__(self, hidden=32, layers=3, seed=0):
         rng = np.random.default_rng(seed)
         D = hidden
@@ -339,11 +415,19 @@ class HATZ:
              "wq": rng.standard_normal(D) * 0.05, "bq": np.zeros(1),
              "wv": rng.standard_normal(D) * 0.05, "bv": np.zeros(1),
              "wo": rng.standard_normal(D) * 0.05, "bo": np.zeros(1),
-             "Wp": init(D, D), "Wr": init(D, D), "Wu": init(D, D)}
+             "Wp": init(D, D), "Wr": init(D, D), "Wu": init(D, D),
+             # GIN-eps co-ownership edge filter head
+             "Wgin": init(D, D), "bgin": np.zeros(D),
+             "eps_gin": np.zeros(1),
+             "Wf1": init(2 * D, D), "bf1": np.zeros(D),
+             "wf2": rng.standard_normal(D) * 0.05, "bf2": np.zeros(1)}
         for l in range(layers):
-            for name in ("Ws", "W0", "W1", "Wev", "Wgl",
-                         "Wes", "Wve", "Wfe", "Wfs", "Wef"):
+            p[f"T0{l}"] = rng.standard_normal((D, D)) * 0.05   # Cayley raw
+            p[f"T1{l}"] = rng.standard_normal((D, D)) * 0.05
+            for name in ("Ws", "Wev", "Wgl", "Wes", "Wve", "Wfe",
+                         "Wfs", "Wef"):
                 p[f"{name}{l}"] = init(D, D)
+            p[f"a{l}"] = rng.standard_normal((len(self.LEVELS), D)) * 0.05
             p[f"bv{l}"] = np.zeros(D)
             p[f"be{l}"] = np.zeros(D)
             p[f"bf{l}"] = np.zeros(D)
@@ -352,50 +436,160 @@ class HATZ:
         self.meta = {}
         self._adam = None
 
-    # ---- forward ---------------------------------------------------------------
+    # ---- per-position structure builders ------------------------------------
 
-    def forward(self, bundle, stones, to_move, mask):
+    @staticmethod
+    def _level_mats(bundle, keep):
+        """Row-normalized plain and eps-signed aggregation over the kept edge
+        subset (a boolean per undirected edge). Structure only: no gradient."""
+        n = bundle.n
+        A = np.zeros((n, n))
+        Ae = np.zeros((n, n))
+        deg = np.zeros(n)
+        for ei, (u, v) in enumerate(bundle.edges):
+            if keep[ei]:
+                deg[u] += 1
+                deg[v] += 1
+        for ei, (u, v) in enumerate(bundle.edges):
+            if keep[ei]:
+                e = bundle.eps[u][v]
+                A[u, v] += 1.0 / deg[u]
+                A[v, u] += 1.0 / deg[v]
+                Ae[u, v] += e / deg[u]
+                Ae[v, u] += e / deg[v]
+        return A, Ae
+
+    def _msc_pool(self, bundle, f):
+        """Filtration pooling of the mid-network ownership field: vertices
+        are banded by interlevel sets of f ({f >= t}, {|f| < t}, {f <= -t}
+        at the median-|f| threshold) and regions are the connected
+        components of each band — Black-leaning territory, contested
+        frontier, White-leaning territory. Components map to components
+        under any symmetry of f, so the partition is exactly
+        automorphism-equivariant; basin partitions are not, because equal
+        chiral plateaus force index tie-breaks. Structure only: the
+        gradient path is the field's own supervision."""
+        n = bundle.n
+        fq = np.round(np.asarray(f, float), 6)
+        t = np.round(float(np.quantile(np.abs(fq), 0.5)), 6)
+        band = np.where(fq >= max(t, 1e-6), 1,
+                        np.where(fq <= -max(t, 1e-6), -1, 0))
+        rid = [-1] * n
+        R = 0
+        for v in range(n):
+            if rid[v] != -1:
+                continue
+            rid[v] = R
+            stack = [v]
+            while stack:
+                x = stack.pop()
+                for u in bundle.adj[x]:
+                    if band[u] == band[v] and rid[u] == -1:
+                        rid[u] = R
+                        stack.append(u)
+            R += 1
+        S = np.zeros((n, R))
+        for v in range(n):
+            S[v, rid[v]] = 1.0
+        P = S.T / np.maximum(S.sum(axis=0), 1.0)[:, None]
+        radj = [set() for _ in range(R)]
+        for v in range(n):
+            for u in bundle.adj[v]:
+                if rid[u] != rid[v]:
+                    radj[rid[v]].add(rid[u])
+        Ar = _mean_matrix([sorted(x) for x in radj], R, R)
+        return S, P, Ar
+
+    # ---- forward -------------------------------------------------------------
+
+    def forward(self, bundle, stones, to_move, mask, frozen=None):
+        """frozen: optional {"mats": ..., "msc": (S, P, Ar)} to reuse
+        position structure — used by the gradient check (structure is
+        stop-grad, so finite differences must not cross partition flips)
+        and available for tree reuse."""
         p, D, L = self.p, self.hidden, self.layers
         Xv, Xe, Xf = bundle.features(stones, to_move)
-        S, P, Ar = bundle.msc_pool(stones, to_move)
         n = bundle.n
         C = {"b": bundle, "Xv": Xv, "Xe": Xe, "Xf": Xf,
-             "S": S, "P": P, "Ar": Ar, "mask": np.asarray(mask, float)}
+             "mask": np.asarray(mask, float)}
         g_in = np.tile(bundle.gfeat, (1, 1))
         Hv = np.maximum(Xv @ p["Wv_in"] + (g_in @ p["Wg_in"]), 0)
         He = np.maximum(Xe @ p["We_in"], 0)
         Hf = np.maximum(Xf @ p["Wf_in"], 0) if Xf is not None else None
         C["Hv0"], C["He0"], C["Hf0"] = Hv, He, Hf
+
+        # GIN-eps co-ownership edge filter (Leventhal 2025; Hofer et al. 2020)
+        Zg = ((1 + p["eps_gin"][0]) * Hv + bundle.Asum @ Hv) @ p["Wgin"]             + p["bgin"]
+        Gh = np.maximum(Zg, 0)
+        eu = np.array([e[0] for e in bundle.edges])
+        ev = np.array([e[1] for e in bundle.edges])
+        xsum = Gh[eu] + Gh[ev]
+        xdif = Gh[eu] - Gh[ev]
+        Xef = np.concatenate([xsum, np.abs(xdif)], axis=1)
+        Zf1 = Xef @ p["Wf1"] + p["bf1"]
+        Hf1 = np.maximum(Zf1, 0)
+        tlog = Hf1 @ p["wf2"] + p["bf2"][0]
+        phi = 1.0 / (1.0 + np.exp(-tlog))
+        C.update(Zg=Zg, Gh=Gh, eu=eu, ev=ev, xdif=xdif, Zf1=Zf1, Hf1=Hf1,
+                 tlog=tlog, phi=phi)
+
+        # filtration levels over the filter values (structure: stop-grad)
+        mats = []
+        for th in self.LEVELS:
+            keep = np.ones(len(bundle.edges), bool) if th is None                 else (phi >= th)
+            mats.append(self._level_mats(bundle, keep))
+        C["mats"] = mats
+
         C["Ls"] = []
+        C["msc"] = None
         for l in range(L):
+            W0, A0c, Q0 = cayley(p[f"T0{l}"])
+            W1, A1c, Q1 = cayley(p[f"T1{l}"])
             gmean = Hv.mean(axis=0, keepdims=True)
-            AH, AeH = bundle.A @ Hv, bundle.Ae @ Hv
+            ms, ss, als = [], [], None
+            for (Al, Ael) in mats:
+                ms.append((Al @ Hv) @ W0 + (Ael @ Hv) @ W1)
+            a = p[f"a{l}"]
+            S_att = np.stack([m @ a[i] for i, m in enumerate(ms)], axis=1)
+            S_att = S_att - S_att.max(axis=1, keepdims=True)
+            expS = np.exp(S_att)
+            alpha = expS / expS.sum(axis=1, keepdims=True)      # (n, P)
+            M = sum(alpha[:, i:i + 1] * ms[i] for i in range(len(ms)))
             EH = bundle.M_ev @ He
-            Zv = (Hv @ p[f"Ws{l}"] + AH @ p[f"W0{l}"] + AeH @ p[f"W1{l}"]
-                  + EH @ p[f"Wev{l}"] + gmean @ p[f"Wgl{l}"] + p[f"bv{l}"])
+            Zv = (Hv @ p[f"Ws{l}"] + M + EH @ p[f"Wev{l}"]
+                  + gmean @ p[f"Wgl{l}"] + p[f"bv{l}"])
             VH = bundle.M_ve @ Hv
             Ze = He @ p[f"Wes{l}"] + VH @ p[f"Wve{l}"] + p[f"be{l}"]
-            FH = None
+            FHe = EHf = Zf = None
             if Hf is not None:
                 FHe = bundle.M_fe @ Hf
                 Ze = Ze + FHe @ p[f"Wfe{l}"]
                 EHf = bundle.M_ef @ He
                 Zf = Hf @ p[f"Wfs{l}"] + EHf @ p[f"Wef{l}"] + p[f"bf{l}"]
-                FH = np.maximum(Zf, 0)
-            Hv2, He2 = np.maximum(Zv, 0), np.maximum(Ze, 0)
-            C["Ls"].append({"Hv": Hv, "He": He, "Hf": Hf, "AH": AH,
-                            "AeH": AeH, "EH": EH, "VH": VH, "gmean": gmean,
-                            "Zv": Zv, "Ze": Ze,
-                            "FHe": FHe if Hf is not None else None,
-                            "EHf": EHf if Hf is not None else None,
-                            "Zf": Zf if Hf is not None else None})
-            Hv, He, Hf = Hv2, He2, FH
-            if l == 0:                                   # Morse–Smale block
-                PH = P @ Hv
+            C["Ls"].append({"Hv": Hv, "He": He, "Hf": Hf, "ms": ms,
+                            "alpha": alpha, "M": M, "EH": EH, "VH": VH,
+                            "gmean": gmean, "Zv": Zv, "Ze": Ze, "FHe": FHe,
+                            "EHf": EHf, "Zf": Zf,
+                            "W0": W0, "A0c": A0c, "Q0": Q0,
+                            "W1": W1, "A1c": A1c, "Q1": Q1})
+            Hv, He = np.maximum(Zv, 0), np.maximum(Ze, 0)
+            Hf = np.maximum(Zf, 0) if Zf is not None else None
+            if l == 0:
+                # ownership at mid-depth: supervised, and the Morse function
+                # whose basins define the pooling regions
+                uo = Hv @ p["wo"] + p["bo"][0]
+                own_mid = np.tanh(uo)
+                if frozen is not None:
+                    S, Pp, Ar = frozen["msc"]
+                else:
+                    S, Pp, Ar = self._msc_pool(bundle, own_mid)
+                PH = Pp @ Hv
                 Zr = PH @ p["Wp"] + (Ar @ PH) @ p["Wr"]
                 Rh = np.maximum(Zr, 0)
                 Hv = Hv + (S @ Rh) @ p["Wu"]
-                C["msc"] = {"PH": PH, "Zr": Zr, "Rh": Rh, "Hv_pre": Hv}
+                C["msc"] = {"S": S, "P": Pp, "Ar": Ar, "PH": PH, "Zr": Zr,
+                            "Rh": Rh, "own_mid": own_mid, "uo": uo}
+
         C["Hv"], C["He"], C["Hf"] = Hv, He, Hf
         gv = Hv.mean(axis=0)
         logits = np.concatenate([Hv @ p["wp"] + p["bp"][0],
@@ -414,15 +608,15 @@ class HATZ:
         probs, value, _, _ = self.forward(bundle, stones, to_move, mask)
         return probs, value
 
-    # ---- backward --------------------------------------------------------------
+    # ---- backward ------------------------------------------------------------
 
-    def backward(self, C, pi, z_t, own_t, grads, vw=1.0, ow=0.5):
+    def backward(self, C, pi, z_t, own_t, grads, eown_t=None,
+                 vw=1.0, ow=0.5, mw=0.25, fw=0.25):
         p, b = self.p, C["b"]
         n = b.n
         probs, value, own, Hv, gv = (C["probs"], C["value"], C["own"],
                                      C["Hv"], C["gv"])
-        loss = -float(np.sum(pi * np.log(probs + 1e-12))) \
-            + vw * (z_t - value) ** 2
+        loss = -float(np.sum(pi * np.log(probs + 1e-12)))             + vw * (z_t - value) ** 2
         dlog = probs - pi
         dHv = np.outer(dlog[:n], p["wp"])
         grads["wp"] += Hv.T @ dlog[:n]
@@ -442,37 +636,83 @@ class HATZ:
             grads["bo"][0] += do.sum()
         dHv = dHv + dgv[None, :] / n
 
+        # edge co-ownership filter supervision (gradient reaches the filter
+        # head here; the level masks themselves are stop-grad structure)
+        dGh = np.zeros_like(C["Gh"])
+        if eown_t is not None and len(C["phi"]):
+            ne = len(C["phi"])
+            loss += fw * float(np.mean(
+                -eown_t * np.log(C["phi"] + 1e-12)
+                - (1 - eown_t) * np.log(1 - C["phi"] + 1e-12)))
+            dt = fw * (C["phi"] - eown_t) / ne
+            grads["wf2"] += C["Hf1"].T @ dt
+            grads["bf2"][0] += dt.sum()
+            dHf1 = np.outer(dt, p["wf2"]) * (C["Zf1"] > 0)
+            grads["Wf1"] += np.concatenate(
+                [C["Gh"][C["eu"]] + C["Gh"][C["ev"]],
+                 np.abs(C["xdif"])], axis=1).T @ dHf1
+            grads["bf1"] += dHf1.sum(axis=0)
+            dXef = dHf1 @ p["Wf1"].T
+            D = self.hidden
+            dsum, ddif = dXef[:, :D], dXef[:, D:] * np.sign(C["xdif"])
+            np.add.at(dGh, C["eu"], dsum + ddif)
+            np.add.at(dGh, C["ev"], dsum - ddif)
+
         L = self.layers
         dHe = np.zeros_like(C["He"])
         dHf = np.zeros_like(C["Hf"]) if C["Hf"] is not None else None
         for l in reversed(range(L)):
-            if l == 0:                                   # MSC block backward
+            if l == 0 and C["msc"] is not None:
                 m = C["msc"]
-                dRhWu = dHv.copy()
-                grads["Wu"] += m["Rh"].T @ (C["S"].T @ dHv)
-                dRh = (C["S"].T @ dRhWu) @ p["Wu"].T
+                grads["Wu"] += m["Rh"].T @ (m["S"].T @ dHv)
+                dRh = (m["S"].T @ dHv) @ p["Wu"].T
                 dZr = dRh * (m["Zr"] > 0)
                 grads["Wp"] += m["PH"].T @ dZr
-                grads["Wr"] += (C["Ar"] @ m["PH"]).T @ dZr
-                dPH = dZr @ p["Wp"].T + C["Ar"].T @ (dZr @ p["Wr"].T)
-                dHv = dHv + C["P"].T @ dPH
+                grads["Wr"] += (m["Ar"] @ m["PH"]).T @ dZr
+                dPH = dZr @ p["Wp"].T + m["Ar"].T @ (dZr @ p["Wr"].T)
+                dHv = dHv + m["P"].T @ dPH
+                if own_t is not None:                 # mid-ownership term
+                    om = m["own_mid"]
+                    dm = mw * 2 * (om - own_t) / n * (1 - om * om)
+                    loss += mw * float(np.mean((om - own_t) ** 2))
+                    dHv = dHv + np.outer(dm, p["wo"])
+                    HvA = np.maximum(C["Ls"][0]["Zv"], 0)
+                    grads["wo"] += HvA.T @ dm
+                    grads["bo"][0] += dm.sum()
             Lc = C["Ls"][l]
             dZv = dHv * (Lc["Zv"] > 0)
             dZe = dHe * (Lc["Ze"] > 0)
             grads[f"Ws{l}"] += Lc["Hv"].T @ dZv
-            grads[f"W0{l}"] += Lc["AH"].T @ dZv
-            grads[f"W1{l}"] += Lc["AeH"].T @ dZv
             grads[f"Wev{l}"] += Lc["EH"].T @ dZv
             grads[f"Wgl{l}"] += Lc["gmean"].T @ dZv.sum(axis=0, keepdims=True)
             grads[f"bv{l}"] += dZv.sum(axis=0)
             grads[f"Wes{l}"] += Lc["He"].T @ dZe
             grads[f"Wve{l}"] += Lc["VH"].T @ dZe
             grads[f"be{l}"] += dZe.sum(axis=0)
-            dHv_new = (dZv @ p[f"Ws{l}"].T + b.A.T @ (dZv @ p[f"W0{l}"].T)
-                       + b.Ae.T @ (dZv @ p[f"W1{l}"].T)
+
+            # level attention backward: M = sum_i alpha_i * m_i
+            alpha, ms, M = Lc["alpha"], Lc["ms"], Lc["M"]
+            a = p[f"a{l}"]
+            GM = dZv
+            gm_dot_M = (GM * M).sum(axis=1)
+            dW0 = np.zeros_like(Lc["W0"])
+            dW1 = np.zeros_like(Lc["W1"])
+            dHv_new = (dZv @ p[f"Ws{l}"].T
                        + b.M_ve.T @ (dZe @ p[f"Wve{l}"].T)
                        + np.ones((n, 1)) @ ((dZv @ p[f"Wgl{l}"].T)
                                             .sum(axis=0, keepdims=True)) / n)
+            for i, (Al, Ael) in enumerate(C["mats"]):
+                ds = alpha[:, i] * ((GM * ms[i]).sum(axis=1) - gm_dot_M)
+                dm = alpha[:, i:i + 1] * GM + np.outer(ds, a[i])
+                grads[f"a{l}"][i] += ms[i].T @ ds
+                AH = Al @ Lc["Hv"]
+                AeH = Ael @ Lc["Hv"]
+                dW0 += AH.T @ dm
+                dW1 += AeH.T @ dm
+                dHv_new += Al.T @ (dm @ Lc["W0"].T)                     + Ael.T @ (dm @ Lc["W1"].T)
+            grads[f"T0{l}"] += cayley_backward(dW0, Lc["A0c"], Lc["Q0"])
+            grads[f"T1{l}"] += cayley_backward(dW1, Lc["A1c"], Lc["Q1"])
+
             dHe_new = dZe @ p[f"Wes{l}"].T + b.M_ev.T @ (dZv @ p[f"Wev{l}"].T)
             if Lc["Hf"] is not None:
                 dZf = dHf * (Lc["Zf"] > 0)
@@ -480,13 +720,23 @@ class HATZ:
                 grads[f"Wfs{l}"] += Lc["Hf"].T @ dZf
                 grads[f"Wef{l}"] += Lc["EHf"].T @ dZf
                 grads[f"bf{l}"] += dZf.sum(axis=0)
-                dHf_new = dZf @ p[f"Wfs{l}"].T + b.M_fe.T @ (dZe @ p[f"Wfe{l}"].T)
+                dHf = dZf @ p[f"Wfs{l}"].T + b.M_fe.T @ (dZe @ p[f"Wfe{l}"].T)
                 dHe_new = dHe_new + b.M_ef.T @ (dZf @ p[f"Wef{l}"].T)
-                dHf = dHf_new
             dHv, dHe = dHv_new, dHe_new
+
+        # GIN filter head backward into the input embedding
+        if np.any(dGh):
+            dZg = dGh * (C["Zg"] > 0)
+            pre = (1 + p["eps_gin"][0]) * C["Hv0"] + b.Asum @ C["Hv0"]
+            grads["Wgin"] += pre.T @ dZg
+            grads["bgin"] += dZg.sum(axis=0)
+            dpre = dZg @ p["Wgin"].T
+            grads["eps_gin"][0] += float((dpre * C["Hv0"]).sum())
+            dHv = dHv + (1 + p["eps_gin"][0]) * dpre + b.Asum.T @ dpre
+
         dZ = dHv * (C["Hv0"] > 0)
         grads["Wv_in"] += C["Xv"].T @ dZ
-        grads["Wg_in"] += np.tile(C["b"].gfeat, (1, 1)).T @ dZ.sum(
+        grads["Wg_in"] += np.tile(b.gfeat, (1, 1)).T @ dZ.sum(
             axis=0, keepdims=True)
         dZe0 = dHe * (C["He0"] > 0)
         grads["We_in"] += C["Xe"].T @ dZe0
@@ -528,6 +778,19 @@ class HATZ:
         net.meta = {k: v for k, v in meta.items()
                     if k not in ("hidden", "layers")}
         return net
+
+
+def co_ownership_targets(bundle, own_black):
+    """Per-edge target: 1 if the endpoints end up owned by the same player,
+    0 if by opposite players, 0.5 if either is neutral. Perspective-invariant."""
+    t = np.full(len(bundle.edges), 0.5)
+    for ei, (u, v) in enumerate(bundle.edges):
+        s = own_black[u] * own_black[v]
+        if s > 0:
+            t[ei] = 1.0
+        elif s < 0:
+            t[ei] = 0.0
+    return t
 
 
 # ---------- ownership targets ----------------------------------------------------
