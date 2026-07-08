@@ -50,6 +50,7 @@ SPECS = {
     "klein2":   ("klein",    "square", 2),
     "rp22":     ("rp2",      "square", 2),
     "mobius-h": ("mobius",   "hex",    1),
+    "mobius2":  ("mobius",   "square", 2),
 }
 
 # 3D lattices need the dimension override
