@@ -43,14 +43,31 @@ SPECS = {
     "mobius":   ("mobius",   "square", 1),
     "klein":    ("klein",    "square", 1),
     "rp2":      ("rp2",      "square", 1),
+    # harder tier: bigger, higher-genus-adjacent, non-orientable at scale, 3D
+    "sphere2":  ("sphere",   "tri",    3),   # geodesic f3, 92
+    "torus2":   ("torus",    "square", 2),   # 7x7, 49
+    "torus-h2": ("torus",    "hex",    2),
+    "klein2":   ("klein",    "square", 2),
+    "rp22":     ("rp2",      "square", 2),
+    "mobius-h": ("mobius",   "hex",    1),
 }
+
+# 3D lattices need the dimension override
+SPECS_3D = {
+    "box3":   ("box",   "square", 1),
+    "torus3": ("torus", "square", 1),
+}
+SPECS.update(SPECS_3D)
+
+HARDER = ["sphere2", "torus2", "klein2", "rp22", "box3", "torus3"]
 
 LOWEST = ["sphere", "plane", "cylinder", "torus", "mobius", "klein", "rp2"]
 
 
 def board_for(key: str):
     surface, mesh, r = SPECS[key]
-    return make_board(surface=surface, mesh=mesh, resolution=r)
+    dim = 3 if key in SPECS_3D else 2
+    return make_board(surface=surface, mesh=mesh, resolution=r, dimension=dim)
 
 
 def new_game(key: str, komi: float = 7.5) -> Game:

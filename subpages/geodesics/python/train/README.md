@@ -50,6 +50,31 @@ exactly the surfaces/meshes in its training meta; its `strong` level runs a
 96-sim search on the request's own graph. Backprop is hand-written numpy,
 verified against numerical gradients over every parameter in the tests.
 
+### Into the browser, no bridge
+
+    python3 train_zero.py --iters 150 --specs lowest --export-web zero-all
+    cd ../../web && node build.mjs ../geodesics.html
+
+`--export-web` writes the trained net into `web/models/<id>.{js,weights.json}`
+— the JS file implements the identical forward pass (verified to machine
+precision in the tests), registers in the Opponent menu with the supports it
+trained on, and runs fully client-side at casual (policy sampling) and
+standard (argmax) levels. A ~6.5k-parameter net is ~80 KB of JSON; scale
+`--hidden 64 --layers 4` and it is still tiny.
+
+### Harder boards & generalization
+
+`env.py` now carries a harder tier — `sphere2` (92v geodesic), `torus2`,
+`klein2`, `rp22` (49v), `torus-h2`, `mobius-h`, and true 3D lattices `box3` /
+`torus3` (4x4x4, 64v) — use `--specs sphere2,klein2,box3` etc. Recipes that
+work: train one pool across many topologies for a generalist (the net is
+graph-native, so it transfers); curriculum by resolution (train `torus`, then
+fine-tune on `torus2` — same weights, bigger graph); per-family specialists
+exported under separate ids so the menu gates each to its boards. The
+highest-leverage upgrade remains symmetry augmentation by graph
+automorphisms: every self-play position multiplies by |Aut| (60 rotations on
+a geodesic sphere, all translations on a torus) at zero search cost.
+
 ## Tests
 
     python3 test_train.py

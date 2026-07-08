@@ -227,6 +227,55 @@ pt = policy_target(counts, 0.0)
 ok(abs(pt.sum() - 1) < 1e-9 and pt.max() == 1.0,
    "policy_target: temperature 0 is a one-hot on the visit argmax")
 
+# ---- browser export: JS forward numerically matches python ----------------------------
+
+from train_zero import export_web                                     # noqa
+netw = ZeroNet.load(ck)
+export_web(netw, "zero-webtest")
+wj2 = os.path.join(ROOT, "web", "models", "zero-webtest.weights.json")
+mj2 = os.path.join(ROOT, "web", "models", "zero-webtest.js")
+web_ok = os.path.isfile(wj2) and os.path.isfile(mj2)
+if web_ok and shutil.which("node"):
+    gp = new_game("plane")
+    adj_p = [list(a) for a in gp.board.adj]
+    stones_p = [0] * gp.board.n
+    stones_p[6], stones_p[12], stones_p[8] = 1, 2, 1
+    mask_p = np.ones(gp.board.n + 1)
+    mask_p[12] = mask_p[6] = mask_p[8] = 0
+    probs_p, val_p, _ = netw.forward(mean_matrix(adj_p), 
+                                     features(adj_p, stones_p, 1), mask_p)
+    probe = """
+const GeoAI = { models: [] };
+const WEIGHTS = require(%r);
+%s
+const m = GeoAI.models[0];
+const eng = m.create(%s, { level: "standard" });
+const r = eng.forward(%s, 1, %s);
+const pick = eng.pickMove(%s, 1, { legalMask: %s });
+console.log(JSON.stringify({ probs: Array.from(r.probs), value: r.value,
+                             move: pick.move, supports: m.supports }));
+""" % (wj2, open(mj2).read(), json.dumps(adj_p), json.dumps(stones_p),
+       json.dumps(list(mask_p)), json.dumps(stones_p),
+       json.dumps([1 if stones_p[v] == 0 else 0 for v in range(25)]))
+    pf2 = "/tmp/zero_web_probe.js"
+    open(pf2, "w").write(probe)
+    out = subprocess.run(["node", pf2], capture_output=True, text=True)
+    try:
+        j = json.loads(out.stdout)
+        dp = float(np.abs(np.array(j["probs"]) - probs_p).max())
+        dv = abs(j["value"] - val_p)
+        legal_pick = j["move"] == -1 or (0 <= j["move"] < 25
+                                         and stones_p[j["move"]] == 0)
+        web_ok = dp < 1e-6 and dv < 1e-6 and legal_pick             and j["supports"]["surfaces"] == netw.meta["surfaces"]
+        detail = f"max|dp|={dp:.1e}, |dv|={dv:.1e}"
+    except Exception as e:
+        web_ok, detail = False, f"{e}: {out.stdout[-200:]} {out.stderr[-200:]}"
+    ok(web_ok, "browser export: the JS model's forward pass matches the "
+       f"python net ({detail}) and plays legally")
+for f in (wj2, mj2):
+    if os.path.isfile(f):
+        os.remove(f)
+
 # ---- bridge bot ---------------------------------------------------------------------
 
 os.environ["ZERO_CKPT"] = ck
