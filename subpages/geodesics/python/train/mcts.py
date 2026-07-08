@@ -45,8 +45,11 @@ class MCTS:
         mask[self.n] = 1                       # pass is always available
         for v in legal:
             mask[v] = 1
-        X = features(self.board.adj, stones, to_move)
-        probs, value, _ = self.net.forward(self.A, X, mask)
+        if hasattr(self.net, "policy_value"):     # bundle-based nets (hatz)
+            probs, value = self.net.policy_value(self.A, stones, to_move, mask)
+        else:
+            X = features(self.board.adj, stones, to_move)
+            probs, value, _ = self.net.forward(self.A, X, mask)
         node = {"P": probs, "mask": mask, "N": np.zeros(self.n + 1),
                 "W": np.zeros(self.n + 1), "value": value}
         self.nodes[key] = node

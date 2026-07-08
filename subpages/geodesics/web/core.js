@@ -463,6 +463,44 @@ function mobiusNormal(u, v, nx, ny, R, w) {
   const r = Math.hypot(c[0], c[1], c[2]) || 1;
   return [c[0] / r, c[1] / r, c[2] / r];
 }
+
+function surfNormal(P) {
+  return (u, v) => {
+    const e = 1e-3, p0 = P(u, v), pu = P(u + e, v), pv = P(u, v + e);
+    const a = [pu[0]-p0[0], pu[1]-p0[1], pu[2]-p0[2]];
+    const b = [pv[0]-p0[0], pv[1]-p0[1], pv[2]-p0[2]];
+    const n = [a[1]*b[2]-a[2]*b[1], a[2]*b[0]-a[0]*b[2], a[0]*b[1]-a[1]*b[0]];
+    const L = Math.hypot(...n) || 1;
+    return [n[0]/L, n[1]/L, n[2]/L];
+  };
+}
+
+function cylinderPoint(u, v, nx, ny, R, sp) {
+  const U = 2 * Math.PI * u / nx;
+  return [R * Math.cos(U), (v - (ny - 1) / 2) * sp, R * Math.sin(U)];
+}
+
+// Figure-8 immersion of the Klein bottle. With T offset by half a cell it
+// satisfies P(u + nx, v) = P(u, ny - 1 - v) exactly (the x-wrap flip), and
+// P(u, v + ny) = P(u, v) (the plain y-wrap) — the quotient's identifications.
+function kleinPoint(u, v, nx, ny, a, b) {
+  const U = 2 * Math.PI * u / nx, T = 2 * Math.PI * (v + 0.5) / ny;
+  const r = a + b * (Math.cos(U / 2) * Math.sin(T)
+                     - Math.sin(U / 2) * Math.sin(2 * T));
+  return [r * Math.cos(U), b * (Math.sin(U / 2) * Math.sin(T)
+          + Math.cos(U / 2) * Math.sin(2 * T)), r * Math.sin(U)];
+}
+
+// Steiner's Roman surface: the projective plane via the antipodal-invariant
+// map (x,y,z) -> (yz, zx, xy) of the sphere. The x-wrap flip identification
+// is exact; the y-wrap one lands on a rigidly rotated copy — RP^2 admits no
+// embedding in R^3, so one gluing necessarily shows as a self-intersection.
+function rp2Point(u, v, nx, ny, S) {
+  const th = Math.PI * (u + 0.5) / nx, ph = Math.PI * (v + 0.5) / ny;
+  const x = Math.sin(ph) * Math.cos(th), y = Math.sin(ph) * Math.sin(th),
+        z = Math.cos(ph);
+  return [S * y * z, S * z * x, S * x * y];
+}
 function slerp(a, b, t) {
   let dot = a[0] * b[0] + a[1] * b[1] + a[2] * b[2];
   dot = Math.min(1, Math.max(-1, dot));
@@ -567,6 +605,7 @@ if (typeof module !== "undefined") {
   module.exports = { gridQuotient, boxLattice, geodesicSphere, goldbergSphere,
                      cubeSphere, Engine, chainAt,
                      torusPoint, torusNormal, mobiusPoint, mobiusNormal,
+                     surfNormal, cylinderPoint, kleinPoint, rp2Point,
                      slerp, edgeList, greedyVertexColoring, greedyEdgeColoring,
                      greedyFaceColoring, encodeShare, decodeShare,
                      EMPTY, BLACK, WHITE };

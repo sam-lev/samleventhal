@@ -180,8 +180,11 @@ def self_play_game(net, key, boards, sims, seed, temp_moves=10):
     move_no = 0
     while not game.game_over and move_no < 4 * board.n:
         counts = tree.run(game, sims)
-        tau = 1.0 if move_no < temp_moves else 0.0
-        pi = policy_target(counts, tau)
+        if move_no < board.n // 2 and counts[:board.n].sum() > 0:
+            counts = counts.copy()          # no early passing in self-play
+            counts[board.n] = 0             # (Tromp-Taylor + komi makes
+        tau = 1.0 if move_no < temp_moves else 0.0   # early pass-pass a
+        pi = policy_target(counts, tau)              # degenerate White win)
         mask = np.zeros(board.n + 1)
         mask[board.n] = 1
         for v in game.legal_moves():
@@ -219,8 +222,8 @@ def eval_vs_random(net, key, boards, games, seed):
                 return -1
             X = features(board.adj, gm.colors, color)
             probs, _, _ = net.forward(A, X, mask)
-            a = int(np.argmax(probs))
-            return -1 if a == board.n else a
+            a = int(np.argmax(probs[:board.n]))     # prefer playing to passing
+            return a if probs[a] > 0 else -1
 
         rnd = random_agent(random.Random(seed * 31 + g))
         black, white = (net_agent, rnd) if g % 2 == 0 else (rnd, net_agent)

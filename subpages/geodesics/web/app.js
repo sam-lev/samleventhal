@@ -46,7 +46,53 @@ const SURFACES = {
       square: { scales: [3, 4, 5] },        // n x n x n lattice
     },
   },
+  cylinder: {
+    label: "Cylinder",
+    meshes: {
+      square: { scales: [[9, 5], [11, 7], [13, 9]] },
+    },
+  },
+  klein: {
+    label: "Klein bottle K\u00B2",
+    meshes: {
+      square: { scales: [[7, 7], [9, 9], [11, 11]] },
+    },
+  },
+  rp2: {
+    label: "Projective plane \u211DP\u00B2",
+    meshes: {
+      square: { scales: [[7, 7], [9, 9], [11, 11]] },
+    },
+  },
 };
+
+// quotient-grid surfaces: identification flags + display style. Adjacency
+// conventions verified edge-for-edge against the python package (test suite).
+const QUOT = {
+  torus:    { wrapY: true,  flipX: false, flipY: false, flat: false },
+  mobius:   { wrapY: false, flipX: true,  flipY: false, flat: true  },
+  cylinder: { wrapY: false, flipX: false, flipY: false, flat: false },
+  klein:    { wrapY: true,  flipX: true,  flipY: false, flat: true  },
+  rp2:      { wrapY: true,  flipX: true,  flipY: true,  flat: true  },
+};
+const CYL = { R: 1.7, sp: 0.62 };
+const KLN = { a: 2.1, b: 0.85 };
+const RP2 = { S: 2.9 };
+function quotPN(surface, nx, ny) {
+  let P;
+  if (surface === "torus") P = (u, v) => torusPoint(u, v, nx, ny, TOR.R, TOR.r);
+  else if (surface === "mobius")
+    P = (u, v) => mobiusPoint(u, v, nx, ny, MOB.R, MOB.w);
+  else if (surface === "cylinder")
+    P = (u, v) => cylinderPoint(u, v, nx, ny, CYL.R, CYL.sp);
+  else if (surface === "klein")
+    P = (u, v) => kleinPoint(u, v, nx, ny, KLN.a, KLN.b);
+  else P = (u, v) => rp2Point(u, v, nx, ny, RP2.S);
+  const N = surface === "torus" ? (u, v) => torusNormal(u, v, nx, ny)
+    : surface === "mobius" ? (u, v) => mobiusNormal(u, v, nx, ny, MOB.R, MOB.w)
+    : surfNormal(P);
+  return { P, N };
+}
 const MESH_LABELS = { tri: "Triangular \u00B7 deg 6",
                       square: "Square \u00B7 deg 4",
                       hex: "Hexagonal \u00B7 deg 3" };
@@ -113,7 +159,7 @@ function degText(adj) {
 // coordinates makes edge curves cross seams (including the Möbius flip)
 // without special cases: torusPoint is periodic, mobiusPoint satisfies
 // P(u + nx, v) = P(u, ny-1-v).
-function coverRep(x1, y1, x2, y2, nx, ny, wrapX, wrapY, flipX) {
+function coverRep(x1, y1, x2, y2, nx, ny, wrapX, wrapY, flipX, flipY) {
   const cands = [[x2, y2]];
   if (wrapX) {
     cands.push([x2 + nx, flipX ? ny - 1 - y2 : y2]);
@@ -121,7 +167,9 @@ function coverRep(x1, y1, x2, y2, nx, ny, wrapX, wrapY, flipX) {
   }
   if (wrapY) {
     const more = [];
-    for (const [cx, cy] of cands) more.push([cx, cy + ny], [cx, cy - ny]);
+    for (const [cx, cy] of cands)
+      more.push([flipY ? nx - 1 - cx : cx, cy + ny],
+                [flipY ? nx - 1 - cx : cx, cy - ny]);
     cands.push(...more);
   }
   let best = cands[0], bd = Infinity;
@@ -182,40 +230,48 @@ function buildBoard(surface, meshType, scaleIdx) {
     if (B.faces) B.meshFaces = B.faces;          // incidence derivation
   }
 
-  else if (surface === "torus" || surface === "mobius") {
+  else if (QUOT[surface]) {
     const [nx, ny] = scale;
-    const wrapY = surface === "torus", flipX = surface === "mobius";
-    const g = gridQuotient(nx, ny, true, wrapY, flipX, false, meshType);
+    const { wrapY, flipX, flipY } = QUOT[surface];
+    const g = gridQuotient(nx, ny, true, wrapY, flipX, flipY, meshType);
     B.adj = g.adj; B.nx = nx; B.ny = ny;
-    const P = surface === "torus"
-      ? (u, v) => torusPoint(u, v, nx, ny, TOR.R, TOR.r)
-      : (u, v) => mobiusPoint(u, v, nx, ny, MOB.R, MOB.w);
-    const N = surface === "torus"
-      ? (u, v) => torusNormal(u, v, nx, ny)
-      : (u, v) => mobiusNormal(u, v, nx, ny, MOB.R, MOB.w);
+    const { P, N } = quotPN(surface, nx, ny);
     B.pos = g.uv.map(([x, y]) => P(x, y));
     B.uv = g.uv;
-    B._P = P; B._N = N; B._wrapX = true; B._wrapY = wrapY; B._flipX = flipX;
+    B._P = P; B._N = N; B._wrapX = true; B._wrapY = wrapY;
+    B._flipX = flipX; B._flipY = flipY;
     B.kind = surface;
-    B.flatStones = surface === "mobius";
+    B.flatStones = QUOT[surface].flat;
     B.normalAt = i => N(g.uv[i][0], g.uv[i][1]);
     B.edgeCurve = (a, b, S) => {
       const [x1, y1] = g.uv[a];
       const [x2, y2] = coverRep(x1, y1, g.uv[b][0], g.uv[b][1],
-                                nx, ny, true, wrapY, flipX);
+                                nx, ny, true, wrapY, flipX, flipY);
       const out = [];
       for (let s = 0; s <= S; s++) {
         const t = s / S;
         out.push(P(x1 + (x2 - x1) * t, y1 + (y2 - y1) * t));
       }
+      // where an immersion cannot honor a gluing exactly (RP2's second
+      // identification: no R^3 embedding exists), blend the residual to zero
+      // so the drawn edge still ends on its vertex. Exact surfaces: no-op.
+      const tgt = P(g.uv[b][0], g.uv[b][1]);
+      const d = [tgt[0] - out[S][0], tgt[1] - out[S][1], tgt[2] - out[S][2]];
+      if (d[0] || d[1] || d[2])
+        for (let s = 0; s <= S; s++) {
+          const t = s / S;
+          out[s] = [out[s][0] + d[0] * t, out[s][1] + d[1] * t,
+                    out[s][2] + d[2] * t];
+        }
       return out;
     };
-    if (surface === "mobius") {
+    if (!wrapY) {                       // open boundaries (mobius, cylinder)
       const modal = modalDegree(B.adj);
       B.adj.forEach((l, i) => { if (l.length < modal) B.defects.add(i); });
     }
-    if (meshType === "square" || meshType === "tri" ||
-        (meshType === "hex" && wrapY)) {
+    if ((surface === "torus" || surface === "mobius") &&
+        (meshType === "square" || meshType === "tri" ||
+         (meshType === "hex" && wrapY))) {
       // grid cells as faces (corner vertex ids, with seam identifications)
       const vid = (x, y) => y * nx + x;
       const red = (x, y) => {
@@ -536,11 +592,10 @@ function buildSurfaceMesh(B) {
     m.position.z = -0.012;
     return m;
   }
-  if (B.kind === "torus" || B.kind === "mobius") {
+  if (QUOT[B.kind]) {
     const nu = B.nx * 8, nv = 24;
-    const P = B.kind === "torus"
-      ? (u, v) => torusPoint(u / nu * B.nx, v / nv * (B.ny - (B.kind === "torus" ? 0 : 1)), B.nx, B.ny, TOR.R, TOR.r)
-      : (u, v) => mobiusPoint(u / nu * B.nx, v / nv * (B.ny - 1), B.nx, B.ny, MOB.R, MOB.w);
+    const vspan = B._wrapY ? B.ny : B.ny - 1;
+    const P = (u, v) => B._P(u / nu * B.nx, v / nv * vspan);
     const verts = [], idx = [];
     for (let v = 0; v <= nv; v++)
       for (let u = 0; u <= nu; u++) verts.push(...P(u, v));
@@ -1136,6 +1191,12 @@ const EXPLAIN = {
       b: "A closed, orientable surface: Euler characteristic \u03C7 = 2, no boundary (\u2202 = 0). Every direction wraps around, so there is no first line to crawl on and no corner in which to live cheaply \u2014 all territory must be enclosed in the open. Click this readout before the first move to cycle surfaces." };
     if (s === "torus") return { t: "T\u00B2 \u2014 the torus",
       b: "The quotient of a rectangle with opposite sides glued, no flips. Closed, orientable, genus 1, \u03C7 = 0, \u2202 = 0. The board is vertex-transitive: every point is equivalent, so there are no corners, no edges, no hoshi \u2014 opening theory must start from pure symmetry. Chains and ladders wrap around both ways." };
+    if (s === "cylinder") return { t: "Cylinder \u2014 an annulus",
+      b: "One periodic direction, two boundary circles: \u03C7 = 0, orientable. Play wraps around the tube but meets a real edge top and bottom \u2014 corner-like safety exists only along the rims. The halfway house between the plane and the torus." };
+    if (s === "klein") return { t: "K\u00B2 \u2014 the Klein bottle",
+      b: "Both directions close up, but one gluing carries a flip: \u03C7 = 0, non-orientable, no boundary at all. Every vertex has full degree \u2014 there is nowhere safe. Drawn as the figure-8 immersion, which necessarily passes through itself: K\u00B2 does not embed in three-space. Walk a chain around the flipped direction and it returns mirror-imaged \u2014 the reflection holonomy the rules never notice but strategy must." };
+    if (s === "rp2") return { t: "\u211DP\u00B2 \u2014 the real projective plane",
+      b: "The square with BOTH edge pairs glued antipodally: \u03C7 = 1, non-orientable, no boundary. The simplest non-orientable closed surface \u2014 the sphere with antipodes identified. Shown as Steiner's Roman surface; since \u211DP\u00B2 admits no embedding in \u211D\u00B3, one gluing unavoidably appears as a self-intersection seam. Two independent orientation-reversing loop classes make this the strangest board in the set." };
     if (s === "mobius") return { t: "M\u00B2 \u2014 the M\u00F6bius band",
       b: "Glue the left and right edges of a rectangle with a flip: the result is one-sided and non-orientable, \u03C7 = 0, with exactly one boundary circle (\u2202 = 1) of twice the apparent length. A chain crossing the seam comes back mirrored \u2014 what looks like two rims is a single connected edge. The brass rim dots mark the boundary points (fewer liberties)." };
     if (s === "plane") return { t: "D\u00B2 \u2014 the disk (the classical board)",

@@ -218,6 +218,22 @@ counts = tree.run(g, 32)
 a = int(np.argmax(counts))
 ok(counts.sum() == 32 and (a == board.n or g.is_legal(a)),
    "mcts: 32 simulations distribute over legal actions; argmax is playable")
+# regression: live-ko positions must search in bounded time (the tree once
+# cycled forever on ko recaptures because transpositions reset ko history)
+import signal                                                          # noqa
+gk = new_game("plane")
+for mv in [6, 1, 8, 13, 12, 11, -1, 7]:
+    gk.play_pass() if mv == -1 else gk.play(mv)
+tk = MCTS(ZeroNet(hidden=16, layers=2, seed=1), gk.board,
+          mean_matrix(gk.board.adj), seed=3)
+signal.alarm(60)
+ck_counts = tk.run(gk, 300)
+signal.alarm(0)
+ak = int(np.argmax(ck_counts))
+ok(ck_counts.sum() == 300 and (ak == gk.board.n or gk.is_legal(ak)),
+   "mcts: 300 simulations through a live ko complete in bounded time "
+   "(positional-superko guard)")
+
 g.play_pass()
 g.play_pass()
 counts2 = tree.run(g, 4)

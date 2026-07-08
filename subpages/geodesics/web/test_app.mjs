@@ -237,6 +237,51 @@ function seamCheck(B, tol) {
 }
 
 
+
+// ---------- new quotient surfaces: python-package parity + build smoke ---------
+{
+  // edge sets exported from the python package (make_board, resolution 1, 5x5):
+  const PY_EDGES = {"cylinder": ["0,1", "0,4", "0,5", "1,2", "1,6", "10,11", "10,14", "10,15", "11,12", "11,16", "12,13", "12,17", "13,14", "13,18", "14,19", "15,16", "15,19", "15,20", "16,17", "16,21", "17,18", "17,22", "18,19", "18,23", "19,24", "2,3", "2,7", "20,21", "20,24", "21,22", "22,23", "23,24", "3,4", "3,8", "4,9", "5,10", "5,6", "5,9", "6,11", "6,7", "7,12", "7,8", "8,13", "8,9", "9,14"], "klein": ["0,1", "0,20", "0,24", "0,5", "1,2", "1,21", "1,6", "10,11", "10,14", "10,15", "11,12", "11,16", "12,13", "12,17", "13,14", "13,18", "14,19", "15,16", "15,20", "16,17", "16,21", "17,18", "17,22", "18,19", "18,23", "19,24", "2,22", "2,3", "2,7", "20,21", "21,22", "22,23", "23,24", "3,23", "3,4", "3,8", "4,20", "4,24", "4,9", "5,10", "5,19", "5,6", "6,11", "6,7", "7,12", "7,8", "8,13", "8,9", "9,14", "9,15"], "rp2": ["0,1", "0,24", "0,5", "1,2", "1,23", "1,6", "10,11", "10,14", "10,15", "11,12", "11,16", "12,13", "12,17", "13,14", "13,18", "14,19", "15,16", "15,20", "16,17", "16,21", "17,18", "17,22", "18,19", "18,23", "19,24", "2,22", "2,3", "2,7", "20,21", "21,22", "22,23", "23,24", "3,21", "3,4", "3,8", "4,20", "4,9", "5,10", "5,19", "5,6", "6,11", "6,7", "7,12", "7,8", "8,13", "8,9", "9,14", "9,15"]};
+  const edges = adj => { const s = new Set();
+    adj.forEach((l, a) => l.forEach(b => s.add(a < b ? a + "," + b : b + "," + a)));
+    return [...s].sort(); };
+  const flags = { cylinder: [true, false, false, false],
+                  klein: [true, true, true, false],
+                  rp2: [true, true, true, true] };
+  let parity = true;
+  for (const [surf, fl] of Object.entries(flags)) {
+    const e = edges(core.gridQuotient(5, 5, ...fl, "square").adj);
+    const t = PY_EDGES[surf];
+    parity = parity && e.length === t.length && e.every((x, i) => x === t[i]);
+  }
+  ok(parity, "cylinder/klein/rp2 quotient adjacency identical to the python " +
+     "package edge-for-edge (5\u00D75) \u2014 trained models transfer");
+}
+
+{
+  const expect = { cylinder: { n: 45, e: 81 },     // 9x5: 45 + 36
+                   klein:    { n: 49, e: 98 },     // 7x7: 4-regular closed
+                   rp2:      { n: 49, e: 96 } };   // 7x7: two corner merges
+  for (const surf of Object.keys(expect)) {
+    const B = buildBoard(surf, "square", 0);
+    const E = B.adj.reduce((s, l) => s + l.length, 0) / 2;
+    const finite = B.pos.every(p => p.every(Number.isFinite));
+    let seam = true;
+    outer: for (let a = 0; a < B.adj.length; a++)
+      for (const b of B.adj[a]) {
+        const [x1, y1] = B.uv[a], [x2, y2] = B.uv[b];
+        if (Math.abs(x1 - x2) > 1.5 || Math.abs(y1 - y2) > 1.5) {
+          seam = B.edgeCurve(a, b, 6).every(p => p.every(Number.isFinite));
+          break outer;
+        }
+      }
+    ok(B.adj.length === expect[surf].n && E === expect[surf].e && finite && seam,
+       `${surf} board builds: ${expect[surf].n} vertices, ${expect[surf].e} ` +
+       "edges, finite embedding, seam edges drawable",
+       `n=${B.adj.length} E=${E}`);
+  }
+}
+
 // ---------- boot smoke: execute the BUILT page end-to-end -----------------------
 // This is the test that guards against exactly one class of shipping accident:
 // a page that parses but dies at boot (e.g. a call to a function a bad merge

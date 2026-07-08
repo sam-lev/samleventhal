@@ -75,6 +75,38 @@ highest-leverage upgrade remains symmetry augmentation by graph
 automorphisms: every self-play position multiplies by |Aut| (60 rotations on
 a geodesic sphere, all translations on a torus) at zero search cost.
 
+## 3. Holonomy-Aware Topological AlphaZero — `train_hatz.py` (research draft)
+
+A v1 of the Stage-2 architecture (`hatz.py`, ~35k params), honest about its
+scope. What each contribution means here: **(1) reflection gauge structure**
+— an orientation cocycle eps on edges, from face cycles (dual BFS) or the
+quotient gluing rule; messages pass through eps-conditioned shared
+restriction maps (W0 + eps*W1), so crossing the Mobius/Klein/RP2 seam applies
+a different learned transport. Cocycle detection is verified against known
+orientability on all 11 board types. **(2) Automorphism equivariance** is
+exact and inherited (weight sharing + Aut-invariant inputs) — tested to
+machine precision via WL-orbit constancy on sphere/torus and the
+seam-preserving Mobius reflection; gauge augmentation trains away the
+remaining seam-placement dependence. **(3) Morse-Smale pooling** — the same
+basin hierarchy that powers the browser engine segments each position's
+influence field into a region graph used as a U-Net-style pooling level
+(position-dependent, parameter-independent, so backprop stays exact;
+gradient-checked to 5e-6 over every parameter). **(4)** V/E/F cell ranks with
+incidence message passing (faces where the board provides them), curvature
+(angle-defect) inputs, PH-lite group features, ownership auxiliary head,
+KataGo-style global pooling.
+
+    python3 train_hatz.py --specs mobius,klein,rp2 --iters 100
+    python3 train_hatz.py --iters 150        # all lowest topologies
+
+Served by `bridge/bots/hatz_mini.py` (the bot reconstructs the seam from
+nx/ny on remote boards and reports "non-orientable seam active"). Known v1
+gaps: no continuous SO(2) part (isotropic aggregation), gauge invariance is
+learned not guaranteed, PH features are local proxies. Note: self-play masks
+passes in the first n/2 moves — under Tromp-Taylor + komi, early pass-pass
+is a degenerate White win that otherwise collapses the policy (KataGo guards
+the same way).
+
 ## Tests
 
     python3 test_train.py
