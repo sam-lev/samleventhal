@@ -32,6 +32,17 @@
       "neural operators"
     ]
   },
+    {
+    "slug": "msc-unsupervised-unet",
+    "title": "Morse–Smale Complexes for Unsupervised U-Net and Graph Learning",
+    "date": "2026-07-07",
+    "excerpt": "An early experiment in topology-as-supervision: can the Morse–Smale complex of an image stand in for hand-drawn labels? Two attempts — an inductive GNN over MSC arcs, and a U-Net trained on multi-persistence MSC segmentations.",
+    "tags": [
+      "topology",
+      "machine learning",
+      "graph neural networks"
+    ]
+  },
   {
     "slug": "cutlass-restoration",
     "title": "Restoring a 1973 Oldsmobile Cutlass Supreme",
