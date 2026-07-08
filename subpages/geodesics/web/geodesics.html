@@ -1,0 +1,3330 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1">
+<title>Geodesics — Go, topologically abstracted</title>
+<style>
+  :root {
+    --bg: #0e1116; --panel: #1a212b; --line: #2a3441;
+    --ink: #8fa3b8; --bone: #e8e2d4; --brass: #c98a3d; --jade: #5bb0a0;
+  }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; height: 100%; background: var(--bg); color: var(--bone);
+    font: 15px/1.5 Palatino, "Palatino Linotype", "Book Antiqua", Georgia, serif;
+    -webkit-font-smoothing: antialiased; overscroll-behavior: none; }
+  #wrap { display: flex; flex-direction: column; height: 100%; }
+  header { padding: 10px 16px 6px; border-bottom: 1px solid var(--line); }
+  .brand { display: flex; align-items: baseline; gap: 14px; flex-wrap: wrap; }
+  .wordmark { font-variant: small-caps; letter-spacing: .34em; font-size: 19px;
+    color: var(--bone); }
+  .wordmark sup { font-size: 9px; letter-spacing: .1em; color: var(--ink); }
+  #plate { font: 12px/1.6 "SF Mono", ui-monospace, Menlo, Consolas, monospace;
+    color: var(--ink); letter-spacing: .04em; }
+  #plate .editable { color: var(--brass); }
+  .info { border-bottom: 1px dotted rgba(143,163,184,.55); cursor: help; }
+  #plate .editable.info { border-bottom-style: dashed; cursor: pointer; }
+  .controls { display: flex; gap: 8px; flex-wrap: wrap; align-items: center;
+    padding: 8px 16px; border-bottom: 1px solid var(--line); }
+  select, button { background: var(--panel); color: var(--bone);
+    border: 1px solid var(--line); border-radius: 6px; padding: 6px 10px;
+    font: inherit; font-size: 13.5px; }
+  select:focus, button:focus { outline: 1px solid var(--brass); }
+  button { cursor: pointer; }
+  button:hover { border-color: var(--brass); }
+  label.toggle { display: inline-flex; align-items: center; gap: 6px;
+    font-size: 13.5px; color: var(--ink); }
+  .hint { padding: 4px 16px 0; font-size: 12px; color: rgba(143,163,184,.75);
+    font-style: italic; }
+  #status { padding: 4px 16px 0; font-size: 13.5px; color: var(--bone); }
+  #msg { padding: 2px 16px 6px; font-size: 13px; color: var(--jade);
+    min-height: 20px; font-style: italic; }
+  #view { flex: 1; min-height: 300px; position: relative; touch-action: none; }
+  #view canvas { position: absolute; inset: 0; width: 100% !important;
+    height: 100% !important; display: block; }
+
+  #tip { position: fixed; z-index: 40; pointer-events: none; max-width: 230px;
+    background: #232c38; color: var(--bone); border: 1px solid var(--line);
+    border-radius: 6px; padding: 5px 9px; font-size: 12px; line-height: 1.35;
+    opacity: 0; transform: translateY(3px); transition: opacity .12s; }
+  #tip.show { opacity: 1; }
+  @media (hover: none) { #tip.show { opacity: 0; } } /* touch: long-press instead */
+
+  #panel { position: fixed; z-index: 50; left: 50%; bottom: -2px;
+    transform: translate(-50%, 105%); width: min(560px, calc(100vw - 20px));
+    background: var(--panel); border: 1px solid var(--line);
+    border-bottom: none; border-radius: 12px 12px 0 0;
+    box-shadow: 0 -12px 40px rgba(0,0,0,.5); padding: 14px 18px 18px;
+    transition: transform .22s ease; max-height: 55vh; overflow: auto; }
+  #panel.open { transform: translate(-50%, 0); }
+  #panelTitle { font-variant: small-caps; letter-spacing: .12em;
+    color: var(--brass); font-size: 15px; margin-right: 30px; }
+  #panelBody { margin-top: 6px; color: var(--bone); font-size: 14px; }
+  #panelBody b { color: var(--jade); font-weight: 600; }
+  #panelClose { position: absolute; top: 8px; right: 10px; border: none;
+    background: none; color: var(--ink); font-size: 18px; padding: 2px 8px; }
+
+  #shareModal { position: fixed; inset: 0; z-index: 60; display: none;
+    background: rgba(8,10,14,.72); align-items: center; justify-content: center; }
+  #shareModal.open { display: flex; }
+  .sheet { background: var(--panel); border: 1px solid var(--line);
+    border-radius: 12px; width: min(520px, calc(100vw - 28px));
+    padding: 16px 18px; position: relative; }
+  .sheet h3 { margin: 0 0 4px; font-variant: small-caps; letter-spacing: .12em;
+    color: var(--brass); font-weight: 600; font-size: 15px; }
+  .sheet p { margin: 4px 0 8px; font-size: 13px; color: var(--ink); }
+  .sheet textarea, .sheet input { width: 100%; background: #12171f;
+    color: var(--bone); border: 1px solid var(--line); border-radius: 6px;
+    padding: 8px; font: 12px/1.4 ui-monospace, Menlo, monospace; }
+  .sheet textarea { height: 76px; resize: vertical; }
+  .sheet .row { display: flex; gap: 8px; margin-top: 8px; }
+  #shareClose { position: absolute; top: 8px; right: 10px; border: none;
+    background: none; color: var(--ink); font-size: 18px; padding: 2px 8px; }
+
+  @media (prefers-reduced-motion: reduce) {
+    #panel, #tip { transition: none; }
+  }
+</style>
+</head>
+<body>
+<div id="wrap">
+  <header>
+    <div class="brand">
+      <div class="wordmark">Geodesics<sup>&trade;</sup></div>
+      <div id="plate"></div>
+    </div>
+  </header>
+  <div class="controls">
+    <select id="surface" class="info" data-info="sel.surface" aria-label="Surface"></select>
+    <select id="mesh" class="info" data-info="sel.mesh" aria-label="Mesh"></select>
+    <select id="scale" class="info" data-info="sel.scale" aria-label="Scale"></select>
+    <select id="incidence" class="info" data-info="sel.incidence" aria-label="Stones on"></select>
+    <select id="opponent" class="info" data-info="sel.opponent" aria-label="Opponent"></select>
+    <select id="aiColor" class="info" data-info="sel.aicolor" aria-label="AI color" hidden></select>
+    <button id="newBtn" class="info" data-info="act.new">New</button>
+    <button id="passBtn" class="info" data-info="act.pass">Pass</button>
+    <button id="undoBtn" class="info" data-info="act.undo">Undo</button>
+    <button id="shareBtn" class="info" data-info="act.share">Share</button>
+    <select id="paint" class="info" data-info="opt.paint" aria-label="Paint"></select>
+    <label class="toggle info" data-info="opt.passalive">
+      <input type="checkbox" id="paToggle"> pass-alive
+    </label>
+  </div>
+  <div class="hint">drag to rotate &middot; wheel to zoom &middot; hover any dotted
+    term, then right-click (or long-press) for the mathematics &middot; plate
+    readouts are click-editable before move 1</div>
+  <div id="status"></div>
+  <div id="msg"></div>
+  <div id="view"></div>
+</div>
+
+<div id="tip"></div>
+
+<div id="panel" role="dialog" aria-label="Explanation">
+  <button id="panelClose" aria-label="Close">&times;</button>
+  <div id="panelTitle"></div>
+  <div id="panelBody"></div>
+</div>
+
+<div id="shareModal">
+  <div class="sheet">
+    <button id="shareClose" aria-label="Close">&times;</button>
+    <h3>Share this game</h3>
+    <p>This code encodes the board spec and every move. Send it; your opponent
+       loads it, plays, and sends the new code back &mdash; correspondence Go
+       on any topology, no server needed.</p>
+    <textarea id="shareCode" readonly></textarea>
+    <div class="row"><button id="shareCopy">Copy</button></div>
+    <p style="margin-top:12px">Load a game from a code or shared URL:</p>
+    <input id="shareIn" placeholder="paste a code or URL">
+    <div class="row"><button id="shareLoad">Load</button></div>
+  </div>
+</div>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+<script>
+/* Geodesics web core — rules + topology, framework-free (testable in node). */
+"use strict";
+
+// ---------- topology: grid quotients (with mesh types) ----------------------
+function gridQuotient(nx, ny, wrapX, wrapY, flipX, flipY, mesh) {
+  mesh = mesh || "square";
+  const vid = (x, y) => y * nx + x;
+  const key = (a, b) => (a < b ? a + ":" + b : b + ":" + a);
+  const eset = new Set();
+  const reduce = (x, y) => {
+    if (x >= nx) { if (!wrapX) return null; x -= nx; if (flipX) y = ny - 1 - y; }
+    if (y >= ny) { if (!wrapY) return null; y -= ny; if (flipY) x = nx - 1 - x; }
+    else if (y < 0) { if (!wrapY) return null; y += ny; if (flipY) x = nx - 1 - x; }
+    return [x, y];
+  };
+  const add = (a, t) => {
+    if (t) { const b = vid(t[0], t[1]); if (a !== b) eset.add(key(a, b)); }
+  };
+  for (let y = 0; y < ny; y++) {
+    for (let x = 0; x < nx; x++) {
+      const v = vid(x, y);
+      add(v, reduce(x + 1, y));
+      if (mesh !== "hex" || (x + y) % 2 === 0) add(v, reduce(x, y + 1));
+      if (mesh === "tri") add(v, reduce(x + 1, y + 1));
+    }
+  }
+  const adj = Array.from({ length: nx * ny }, () => []);
+  for (const k of eset) {
+    const [a, b] = k.split(":").map(Number);
+    adj[a].push(b); adj[b].push(a);
+  }
+  const uv = [];
+  for (let y = 0; y < ny; y++) for (let x = 0; x < nx; x++) uv.push([x, y]);
+  return { adj, uv, nx, ny };
+}
+
+// ---------- topology: 3D box lattice ----------------------------------------
+function boxLattice(n) {
+  const vid = (x, y, z) => (z * n + y) * n + x;
+  const adj = Array.from({ length: n * n * n }, () => []);
+  const xyz = [];
+  for (let z = 0; z < n; z++)
+    for (let y = 0; y < n; y++)
+      for (let x = 0; x < n; x++) {
+        xyz.push([x, y, z]);
+        const v = vid(x, y, z);
+        if (x + 1 < n) { adj[v].push(vid(x + 1, y, z)); adj[vid(x + 1, y, z)].push(v); }
+        if (y + 1 < n) { adj[v].push(vid(x, y + 1, z)); adj[vid(x, y + 1, z)].push(v); }
+        if (z + 1 < n) { adj[v].push(vid(x, y, z + 1)); adj[vid(x, y, z + 1)].push(v); }
+      }
+  return { adj, xyz, n };
+}
+
+// ---------- topology: geodesic sphere {3,5+}_(f,0) -------------------------
+function geodesicSphere(f) {
+  const T = (1 + Math.sqrt(5)) / 2;
+  const norm = (p) => {
+    const r = Math.hypot(p[0], p[1], p[2]);
+    return [p[0] / r, p[1] / r, p[2] / r];
+  };
+  const BV = [
+    [-1, T, 0], [1, T, 0], [-1, -T, 0], [1, -T, 0],
+    [0, -1, T], [0, 1, T], [0, -1, -T], [0, 1, -T],
+    [T, 0, -1], [T, 0, 1], [-T, 0, -1], [-T, 0, 1],
+  ].map(norm);
+  const BF = [
+    [0, 11, 5], [0, 5, 1], [0, 1, 7], [0, 7, 10], [0, 10, 11],
+    [1, 5, 9], [5, 11, 4], [11, 10, 2], [10, 7, 6], [7, 1, 8],
+    [3, 9, 4], [3, 4, 2], [3, 2, 6], [3, 6, 8], [3, 8, 9],
+    [4, 9, 5], [2, 4, 11], [6, 2, 10], [8, 6, 7], [9, 8, 1],
+  ];
+  const verts = [], index = new Map();
+  function keyPos(fid, face, i, j, k) {
+    const [a, b, c] = face;
+    if (j === 0 && k === 0) return [["v", a], BV[a]];
+    if (i === 0 && k === 0) return [["v", b], BV[b]];
+    if (i === 0 && j === 0) return [["v", c], BV[c]];
+    const edge = (p, q, wq) => {
+      if (p > q) { const t = p; p = q; q = t; wq = f - wq; }
+      const pos = [0, 1, 2].map(d => (f - wq) * BV[p][d] + wq * BV[q][d]);
+      return [["e", p, q, wq], norm(pos)];
+    };
+    if (k === 0) return edge(a, b, j);
+    if (j === 0) return edge(a, c, k);
+    if (i === 0) return edge(b, c, k);
+    const pos = [0, 1, 2].map(d => i * BV[a][d] + j * BV[b][d] + k * BV[c][d]);
+    return [["f", fid, i, j], norm(pos)];
+  }
+  function vidOf(fid, face, i, j, k) {
+    const [key, pos] = keyPos(fid, face, i, j, k);
+    const sk = key.join(",");
+    if (!index.has(sk)) { index.set(sk, verts.length); verts.push(pos); }
+    return index.get(sk);
+  }
+  const faces = [];
+  BF.forEach((face, fid) => {
+    const grid = new Map();
+    for (let i = 0; i <= f; i++)
+      for (let j = 0; j <= f - i; j++)
+        grid.set(i + "," + j, vidOf(fid, face, i, j, f - i - j));
+    for (let i = 0; i < f; i++)
+      for (let j = 0; j < f - i; j++) {
+        faces.push([grid.get(i + "," + j), grid.get((i + 1) + "," + j),
+                    grid.get(i + "," + (j + 1))]);
+        if (i + j <= f - 2)
+          faces.push([grid.get((i + 1) + "," + j),
+                      grid.get((i + 1) + "," + (j + 1)),
+                      grid.get(i + "," + (j + 1))]);
+      }
+  });
+  const nb = Array.from({ length: verts.length }, () => new Set());
+  for (const [a, b, c] of faces) {
+    nb[a].add(b).add(c); nb[b].add(a).add(c); nb[c].add(a).add(b);
+  }
+  return { adj: nb.map(s => [...s].sort((x, y) => x - y)),
+           positions: verts, faces };
+}
+
+// ---------- Goldberg sphere: graph-level dual of the geodesic ----------------
+// Vertices at triangle centroids (projected), adjacency across shared edges.
+// Faces: one per geodesic vertex — its incident triangles in cyclic order
+// (angular sort in the tangent plane), pentagons at the 12 defects.
+function goldbergSphere(f) {
+  const g = geodesicSphere(f);
+  const norm = (p) => {
+    const r = Math.hypot(p[0], p[1], p[2]); return [p[0] / r, p[1] / r, p[2] / r];
+  };
+  const positions = g.faces.map(([a, b, c]) => norm([
+    (g.positions[a][0] + g.positions[b][0] + g.positions[c][0]) / 3,
+    (g.positions[a][1] + g.positions[b][1] + g.positions[c][1]) / 3,
+    (g.positions[a][2] + g.positions[b][2] + g.positions[c][2]) / 3,
+  ]));
+  const byEdge = new Map();
+  const adj = Array.from({ length: g.faces.length }, () => []);
+  g.faces.forEach((face, fid) => {
+    for (let i = 0; i < 3; i++) {
+      const a = face[i], b = face[(i + 1) % 3];
+      const k = a < b ? a + ":" + b : b + ":" + a;
+      if (byEdge.has(k)) {
+        const other = byEdge.get(k);
+        adj[fid].push(other); adj[other].push(fid);
+      } else byEdge.set(k, fid);
+    }
+  });
+  const inc = g.positions.map(() => []);
+  g.faces.forEach((tri, fid) => { for (const v of tri) inc[v].push(fid); });
+  const faces = g.positions.map((p, v) => {
+    const ref = Math.abs(p[0]) < 0.9 ? [1, 0, 0] : [0, 1, 0];
+    const d = ref[0] * p[0] + ref[1] * p[1] + ref[2] * p[2];
+    let e1 = [ref[0] - d * p[0], ref[1] - d * p[1], ref[2] - d * p[2]];
+    const r1 = Math.hypot(e1[0], e1[1], e1[2]);
+    e1 = [e1[0] / r1, e1[1] / r1, e1[2] / r1];
+    const e2 = [p[1] * e1[2] - p[2] * e1[1],
+                p[2] * e1[0] - p[0] * e1[2],
+                p[0] * e1[1] - p[1] * e1[0]];
+    const ang = (fid) => {
+      const c = positions[fid];
+      return Math.atan2(c[0] * e2[0] + c[1] * e2[1] + c[2] * e2[2],
+                        c[0] * e1[0] + c[1] * e1[1] + c[2] * e1[2]);
+    };
+    return inc[v].slice().sort((a, b) => ang(a) - ang(b));
+  });
+  return { adj: adj.map(l => l.sort((x, y) => x - y)), positions, faces };
+}
+
+// ---------- cube-sphere: f x f quad subdivision of the cube ------------------
+function cubeSphere(f) {
+  const norm = (p) => {
+    const r = Math.hypot(p[0], p[1], p[2]); return [p[0] / r, p[1] / r, p[2] / r];
+  };
+  const BV = [];
+  for (const x of [-1, 1]) for (const y of [-1, 1]) for (const z of [-1, 1])
+    BV.push([x, y, z]);
+  const BF = [[0, 1, 3, 2], [4, 5, 7, 6], [0, 1, 5, 4],
+              [2, 3, 7, 6], [0, 2, 6, 4], [1, 3, 7, 5]];
+  const verts = [], index = new Map();
+  function keyOf(fid, face, i, j) {
+    const [a, b, c, d] = face;
+    if (i === 0 && j === 0) return "v," + a;
+    if (i === f && j === 0) return "v," + b;
+    if (i === f && j === f) return "v," + c;
+    if (i === 0 && j === f) return "v," + d;
+    const edge = (p, q, w) => {
+      if (p > q) { const t = p; p = q; q = t; w = f - w; }
+      return "e," + p + "," + q + "," + w;
+    };
+    if (j === 0) return edge(a, b, i);
+    if (i === f) return edge(b, c, j);
+    if (j === f) return edge(d, c, i);
+    if (i === 0) return edge(a, d, j);
+    return "f," + fid + "," + i + "," + j;
+  }
+  function vidOf(fid, face, i, j) {
+    const k = keyOf(fid, face, i, j);
+    if (!index.has(k)) {
+      const [a, b, c, d] = face.map(v => BV[v]);
+      const s = i / f, t = j / f;
+      index.set(k, verts.length);
+      verts.push(norm([0, 1, 2].map(q =>
+        (1 - s) * (1 - t) * a[q] + s * (1 - t) * b[q]
+        + s * t * c[q] + (1 - s) * t * d[q])));
+    }
+    return index.get(k);
+  }
+  const eset = new Set();
+  const ek = (a, b) => (a < b ? a + ":" + b : b + ":" + a);
+  const faces = [];
+  BF.forEach((face, fid) => {
+    const grid = new Map();
+    for (let i = 0; i <= f; i++)
+      for (let j = 0; j <= f; j++)
+        grid.set(i + "," + j, vidOf(fid, face, i, j));
+    for (let i = 0; i < f; i++)
+      for (let j = 0; j < f; j++) {
+        const a = grid.get(i + "," + j), b = grid.get((i + 1) + "," + j),
+              c = grid.get((i + 1) + "," + (j + 1)), d = grid.get(i + "," + (j + 1));
+        faces.push([a, b, c, d]);
+        eset.add(ek(a, b)); eset.add(ek(b, c));
+        eset.add(ek(c, d)); eset.add(ek(d, a));
+      }
+  });
+  const adj = Array.from({ length: verts.length }, () => []);
+  for (const k of eset) {
+    const [a, b] = k.split(":").map(Number);
+    adj[a].push(b); adj[b].push(a);
+  }
+  return { adj: adj.map(l => l.sort((x, y) => x - y)), positions: verts, faces };
+}
+
+// ---------- rule engine (Tromp-Taylor on a graph) ---------------------------
+const EMPTY = 0, BLACK = 1, WHITE = 2;
+const OTHER = [0, 2, 1];
+
+function chainAt(colors, adj, v) {
+  const color = colors[v], stones = new Set([v]), libs = new Set(), st = [v];
+  while (st.length) {
+    const u = st.pop();
+    for (const w of adj[u]) {
+      const c = colors[w];
+      if (c === EMPTY) libs.add(w);
+      else if (c === color && !stones.has(w)) { stones.add(w); st.push(w); }
+    }
+  }
+  return { stones, libs };
+}
+
+function Engine(adj, opts) {
+  opts = opts || {};
+  const n = adj.length;
+  const self = {
+    adj, n,
+    allowSuicide: !!opts.allowSuicide,
+    komi: opts.komi || 0,
+    colors: new Array(n).fill(EMPTY),
+    toMove: BLACK,
+    captures: [0, 0, 0],
+    passes: 0,
+    lastMove: null,
+    moves: [],
+    posHist: [],
+    snaps: [],
+  };
+  const key = (cs) => cs.join("");
+  self.posHist.push(key(self.colors));
+
+  self.trySim = function (v, color) {
+    if (self.colors[v] !== EMPTY) return { err: "occupied" };
+    const nc = self.colors.slice();
+    nc[v] = color;
+    const opp = OTHER[color];
+    let captured = [];
+    const seen = new Set();
+    for (const w of adj[v]) {
+      if (nc[w] === opp && !seen.has(w)) {
+        const { stones, libs } = chainAt(nc, adj, w);
+        for (const s of stones) seen.add(s);
+        if (libs.size === 0) {
+          for (const s of stones) { nc[s] = EMPTY; captured.push(s); }
+        }
+      }
+    }
+    let suicided = [];
+    const own = chainAt(nc, adj, v);
+    if (own.libs.size === 0) {
+      if (!self.allowSuicide) return { err: "suicide" };
+      for (const s of own.stones) { nc[s] = EMPTY; suicided.push(s); }
+    }
+    const k = key(nc);
+    if (self.posHist.includes(k)) return { err: "superko" };
+    return { nc, captured, suicided, k };
+  };
+
+  self.play = function (v) {
+    const r = self.trySim(v, self.toMove);
+    if (r.err) return r;
+    self.snaps.push({
+      colors: self.colors, toMove: self.toMove,
+      captures: self.captures.slice(), passes: self.passes,
+      lastMove: self.lastMove,
+    });
+    self.captures[self.toMove] += r.captured.length;
+    if (r.suicided.length) self.captures[OTHER[self.toMove]] += r.suicided.length;
+    self.colors = r.nc;
+    self.moves.push([self.toMove, v]);
+    self.lastMove = v;
+    self.toMove = OTHER[self.toMove];
+    self.passes = 0;
+    self.posHist.push(r.k);
+    return { ok: true, captured: r.captured, suicided: r.suicided };
+  };
+
+  self.pass = function () {
+    self.snaps.push({
+      colors: self.colors, toMove: self.toMove,
+      captures: self.captures.slice(), passes: self.passes,
+      lastMove: self.lastMove,
+    });
+    self.moves.push([self.toMove, null]);
+    self.toMove = OTHER[self.toMove];
+    self.passes += 1;
+    self.lastMove = null;
+    self.posHist.push(self.posHist[self.posHist.length - 1]);
+    return { ok: true, over: self.passes >= 2 };
+  };
+
+  self.undo = function () {
+    if (!self.snaps.length) return false;
+    const s = self.snaps.pop();
+    self.colors = s.colors; self.toMove = s.toMove;
+    self.captures = s.captures; self.passes = s.passes;
+    self.lastMove = s.lastMove;
+    self.moves.pop(); self.posHist.pop();
+    return true;
+  };
+
+  self.gameOver = () => self.passes >= 2;
+
+  self.score = function () {
+    const terr = [0, 0, 0];
+    const stones = [0, 0, 0];
+    for (const c of self.colors) stones[c]++;
+    const seen = new Set();
+    const owner = new Array(n).fill(0);       // territory owner per empty vertex
+    for (let v = 0; v < n; v++) {
+      if (self.colors[v] !== EMPTY || seen.has(v)) continue;
+      const comp = [v], border = new Set(), st = [v];
+      seen.add(v);
+      while (st.length) {
+        const u = st.pop();
+        for (const w of adj[u]) {
+          const c = self.colors[w];
+          if (c === EMPTY) {
+            if (!seen.has(w)) { seen.add(w); comp.push(w); st.push(w); }
+          } else border.add(c);
+        }
+      }
+      let o = 0;
+      if (border.size === 1) o = [...border][0];
+      if (o) { terr[o] += comp.length; for (const u of comp) owner[u] = o; }
+    }
+    const b = stones[BLACK] + terr[BLACK];
+    const w = stones[WHITE] + terr[WHITE] + self.komi;
+    return { black: b, white: w, margin: b - w, owner,
+             winner: b > w ? "Black" : w > b ? "White" : "Draw" };
+  };
+
+  self.passAlive = function (color) {
+    const cid = new Array(n).fill(-1);
+    const chains = [];
+    for (let v = 0; v < n; v++) {
+      if (self.colors[v] === color && cid[v] === -1) {
+        const comp = [v], st = [v];
+        cid[v] = chains.length;
+        while (st.length) {
+          const u = st.pop();
+          for (const w of adj[u])
+            if (self.colors[w] === color && cid[w] === -1) {
+              cid[w] = chains.length; comp.push(w); st.push(w);
+            }
+        }
+        chains.push(comp);
+      }
+    }
+    if (!chains.length) return new Set();
+    const rid = new Array(n).fill(-1);
+    const regions = [];
+    for (let v = 0; v < n; v++) {
+      if (self.colors[v] !== color && rid[v] === -1) {
+        const comp = [v], st = [v], border = new Set();
+        rid[v] = regions.length;
+        while (st.length) {
+          const u = st.pop();
+          for (const w of adj[u]) {
+            if (self.colors[w] !== color) {
+              if (rid[w] === -1) { rid[w] = regions.length; comp.push(w); st.push(w); }
+            } else border.add(cid[w]);
+          }
+        }
+        const empties = comp.filter(u => self.colors[u] === EMPTY);
+        regions.push({ empties, border });
+      }
+    }
+    const vital = regions.map(r => {
+      const vs = new Set();
+      for (const c of r.border) {
+        let ok = true;
+        for (const e of r.empties) {
+          if (!adj[e].some(w => cid[w] === c)) { ok = false; break; }
+        }
+        if (ok) vs.add(c);
+      }
+      return vs;
+    });
+    const liveC = new Set(chains.keys());
+    const liveR = new Set(regions.keys());
+    let changed = true;
+    while (changed) {
+      changed = false;
+      for (const c of [...liveC]) {
+        let count = 0;
+        for (const r of liveR) if (vital[r].has(c)) count++;
+        if (count < 2) { liveC.delete(c); changed = true; }
+      }
+      for (const r of [...liveR]) {
+        for (const b of regions[r].border)
+          if (!liveC.has(b)) { liveR.delete(r); changed = true; break; }
+      }
+    }
+    const out = new Set();
+    for (const c of liveC) for (const s of chains[c]) out.add(s);
+    return out;
+  };
+
+  return self;
+}
+
+// ---------- embeddings (pure math; THREE-free) ------------------------------
+function torusPoint(u, v, nx, ny, R, r) {
+  const th = 2 * Math.PI * u / nx, ph = 2 * Math.PI * v / ny;
+  const q = R + r * Math.cos(ph);
+  return [q * Math.cos(th), r * Math.sin(ph), q * Math.sin(th)];
+}
+function torusNormal(u, v, nx, ny) {
+  const th = 2 * Math.PI * u / nx, ph = 2 * Math.PI * v / ny;
+  return [Math.cos(ph) * Math.cos(th), Math.sin(ph), Math.cos(ph) * Math.sin(th)];
+}
+function mobiusPoint(u, v, nx, ny, R, w) {
+  const th = 2 * Math.PI * u / nx;
+  const t = w * (2 * v / (ny - 1) - 1);
+  const q = R + t * Math.cos(th / 2);
+  return [q * Math.cos(th), t * Math.sin(th / 2), q * Math.sin(th)];
+}
+function mobiusNormal(u, v, nx, ny, R, w) {
+  const e = 1e-4;
+  const p0 = mobiusPoint(u, v, nx, ny, R, w);
+  const pu = mobiusPoint(u + e, v, nx, ny, R, w);
+  const pv = mobiusPoint(u, v + e, nx, ny, R, w);
+  const du = [pu[0] - p0[0], pu[1] - p0[1], pu[2] - p0[2]];
+  const dv = [pv[0] - p0[0], pv[1] - p0[1], pv[2] - p0[2]];
+  const c = [du[1] * dv[2] - du[2] * dv[1],
+             du[2] * dv[0] - du[0] * dv[2],
+             du[0] * dv[1] - du[1] * dv[0]];
+  const r = Math.hypot(c[0], c[1], c[2]) || 1;
+  return [c[0] / r, c[1] / r, c[2] / r];
+}
+function slerp(a, b, t) {
+  let dot = a[0] * b[0] + a[1] * b[1] + a[2] * b[2];
+  dot = Math.min(1, Math.max(-1, dot));
+  const th = Math.acos(dot);
+  if (th < 1e-6) return a.slice();
+  const s = Math.sin(th);
+  const ka = Math.sin((1 - t) * th) / s, kb = Math.sin(t * th) / s;
+  return [ka * a[0] + kb * b[0], ka * a[1] + kb * b[1], ka * a[2] + kb * b[2]];
+}
+
+// ---------- incidence colorings ----------------------------------------------
+// Proper colorings of the board's incidence structure. Greedy over a fixed
+// order: at most Delta+1 vertex colors (Brooks-adjacent) and 2*Delta-1 edge
+// colors (Vizing gives Delta or Delta+1; greedy is close enough for paint).
+function edgeList(adjacency) {
+  const out = [];
+  for (let a = 0; a < adjacency.length; a++)
+    for (const b of adjacency[a]) if (a < b) out.push([a, b]);
+  return out;
+}
+
+function greedyVertexColoring(adjacency) {
+  const n = adjacency.length, color = new Array(n).fill(-1);
+  for (let v = 0; v < n; v++) {
+    const used = new Set();
+    for (const w of adjacency[v]) if (color[w] >= 0) used.add(color[w]);
+    let c = 0;
+    while (used.has(c)) c++;
+    color[v] = c;
+  }
+  return color;
+}
+
+function greedyEdgeColoring(adjacency) {
+  const edges = edgeList(adjacency);
+  const atVertex = adjacency.map(() => []);
+  const colors = new Array(edges.length).fill(-1);
+  edges.forEach(([a, b], i) => {
+    const used = new Set(atVertex[a].concat(atVertex[b]));
+    let c = 0;
+    while (used.has(c)) c++;
+    colors[i] = c;
+    atVertex[a].push(c); atVertex[b].push(c);
+  });
+  return { edges, colors };
+}
+
+// Greedy coloring of faces so faces sharing an edge differ (for cell paint).
+function greedyFaceColoring(faces) {
+  const byEdge = new Map();
+  const nbrs = faces.map(() => []);
+  faces.forEach((f, fid) => {
+    for (let i = 0; i < f.length; i++) {
+      const a = f[i], b = f[(i + 1) % f.length];
+      const k = a < b ? a + ":" + b : b + ":" + a;
+      if (byEdge.has(k)) {
+        const o = byEdge.get(k);
+        nbrs[fid].push(o); nbrs[o].push(fid);
+      } else byEdge.set(k, fid);
+    }
+  });
+  const color = new Array(faces.length).fill(-1);
+  for (let f = 0; f < faces.length; f++) {
+    const used = new Set();
+    for (const g of nbrs[f]) if (color[g] >= 0) used.add(color[g]);
+    let c = 0;
+    while (used.has(c)) c++;
+    color[f] = c;
+  }
+  return color;
+}
+
+// ---------- share codec: game state <-> base64url string ---------------------
+// A shared game is {v: 1, s: [surface, mesh, scaleIdx], m: moves}, where each
+// move is a vertex index or -1 for a pass. Replaying through the engine
+// validates every move, so a tampered code fails loudly rather than silently.
+const _b64e = (typeof btoa !== "undefined") ? btoa
+  : (s) => Buffer.from(s, "binary").toString("base64");
+const _b64d = (typeof atob !== "undefined") ? atob
+  : (s) => Buffer.from(s, "base64").toString("binary");
+
+function encodeShare(spec, moves) {
+  const json = JSON.stringify({ v: 1, s: spec, m: moves });
+  const bytes = unescape(encodeURIComponent(json));
+  return _b64e(bytes).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
+}
+
+function decodeShare(code) {
+  code = code.trim();
+  const h = code.indexOf("#g=");
+  if (h >= 0) code = code.slice(h + 3);          // accept a full shared URL
+  code = code.replace(/-/g, "+").replace(/_/g, "/");
+  while (code.length % 4) code += "=";
+  const json = decodeURIComponent(escape(_b64d(code)));
+  const st = JSON.parse(json);
+  if (st.v !== 1 || !Array.isArray(st.s) || !Array.isArray(st.m))
+    throw new Error("not a Geodesics game code");
+  return st;
+}
+
+if (typeof module !== "undefined") {
+  module.exports = { gridQuotient, boxLattice, geodesicSphere, goldbergSphere,
+                     cubeSphere, Engine, chainAt,
+                     torusPoint, torusNormal, mobiusPoint, mobiusNormal,
+                     slerp, edgeList, greedyVertexColoring, greedyEdgeColoring,
+                     greedyFaceColoring, encodeShare, decodeShare,
+                     EMPTY, BLACK, WHITE };
+}
+
+</script>
+<script>
+/*! GeoCells v0.1 — incidence relationships for Geodesics boards.
+ *
+ * Given a polygonal mesh (vertex count + face vertex-lists, optional
+ * positions), builds the play graph for a chosen site type:
+ *
+ *   vertices  stones on vertices, adjacency along edges — canonical Go
+ *   edges     stones on edges. Default adjacency is the LINE GRAPH (two
+ *             edges connect when they share a vertex) — the same
+ *             representation as the priors graph of Leventhal, Gyulassy,
+ *             Pascucci & Heimann (NeurIPS 2022), where the arcs of a
+ *             topological graph become the classified nodes.
+ *             opts.edgeAdjacency = 'medial' instead connects edges that
+ *             are consecutive around a face (4-regular on closed
+ *             polyhedra).
+ *   faces     stones on faces, adjacency across shared edges — the dual
+ *   cells     stones on ALL cells (vertices ∪ edges ∪ faces) with Hasse
+ *             incidence adjacency: v—e when v is an endpoint of e, e—f
+ *             when e bounds f. Cross-dimensional Go.
+ *
+ * Output is board-shaped — { mode, n, neighbors, positions?, dim, meta } —
+ * so everything downstream (rules, Zobrist, share codec, the AI engine,
+ * rendering by site positions) is unchanged. Quotient identifications
+ * (Möbius, Klein, RP²) are already baked into vertex indices, so the same
+ * pipeline applies; doubled edges arising from identifications are merged.
+ * Meshes without faces (1-D boards) support only 'vertices'.
+ *
+ * No dependencies. Browser: window.GeoCells. Node: module.exports.
+ */
+(function (root, factory) {
+  if (typeof module === "object" && module.exports) module.exports = factory();
+  else root.GeoCells = factory();
+})(typeof self !== "undefined" ? self : this, function () {
+  "use strict";
+
+  const MODES = ["vertices", "edges", "faces", "cells"];
+
+  /**
+   * Build the incidence complex from a mesh.
+   *   mesh: { faces: [[v0, v1, ...], ...], nVerts?, positions?: [[x,y(,z)], ...] }
+   * Edges are derived from face boundaries and deduplicated by vertex pair.
+   */
+  function fromMesh(mesh) {
+    const faces = (mesh.faces || []).map((f) => f.slice());
+    let nV = mesh.nVerts != null ? mesh.nVerts : mesh.positions ? mesh.positions.length : 0;
+    if (!nV) for (const f of faces) for (const v of f) nV = Math.max(nV, v + 1);
+    const eIndex = new Map();
+    const edges = [];
+    const faceEdges = faces.map(() => []);
+    const key = (a, b) => (a < b ? a + "," + b : b + "," + a);
+    faces.forEach((f, fi) => {
+      for (let i = 0; i < f.length; i++) {
+        const a = f[i];
+        const b = f[(i + 1) % f.length];
+        if (a === b) continue;
+        const k = key(a, b);
+        let ei = eIndex.get(k);
+        if (ei === undefined) {
+          ei = edges.length;
+          eIndex.set(k, ei);
+          edges.push([Math.min(a, b), Math.max(a, b)]);
+        }
+        faceEdges[fi].push(ei);
+      }
+    });
+    const vertEdges = Array.from({ length: nV }, () => []);
+    edges.forEach(([a, b], ei) => {
+      vertEdges[a].push(ei);
+      vertEdges[b].push(ei);
+    });
+    const edgeFaces = edges.map(() => []);
+    faceEdges.forEach((fe, fi) => fe.forEach((ei) => edgeFaces[ei].push(fi)));
+    return { nV, faces, edges, faceEdges, vertEdges, edgeFaces, positions: mesh.positions || null };
+  }
+
+  const uniq = (arr) => Array.from(new Set(arr));
+  const meta = (cx) => ({ nV: cx.nV, nE: cx.edges.length, nF: cx.faces.length });
+
+  function midpoint(pos, a, b) {
+    const d = pos[a].length;
+    const c = new Array(d);
+    for (let i = 0; i < d; i++) c[i] = (pos[a][i] + pos[b][i]) / 2;
+    return c;
+  }
+  function centroid(pos, f) {
+    const d = pos[f[0]].length;
+    const c = new Array(d).fill(0);
+    for (let j = 0; j < f.length; j++) for (let i = 0; i < d; i++) c[i] += pos[f[j]][i];
+    return c.map((x) => x / f.length);
+  }
+
+  /** Build the play graph for one incidence mode. */
+  function build(cx, mode, opts) {
+    opts = opts || {};
+    const pos = cx.positions;
+
+    if (mode === "vertices") {
+      const nb = Array.from({ length: cx.nV }, () => []);
+      cx.edges.forEach(([a, b]) => {
+        nb[a].push(b);
+        nb[b].push(a);
+      });
+      return {
+        mode,
+        n: cx.nV,
+        neighbors: nb.map(uniq),
+        positions: pos ? pos.map((p) => p.slice()) : null,
+        dim: new Int8Array(cx.nV),
+        meta: meta(cx),
+      };
+    }
+
+    if (mode === "edges") {
+      const nE = cx.edges.length;
+      const nb = Array.from({ length: nE }, () => new Set());
+      if (opts.edgeAdjacency === "medial") {
+        cx.faceEdges.forEach((fe) => {
+          const L = fe.length;
+          for (let i = 0; i < L; i++) {
+            const a = fe[i];
+            const b = fe[(i + 1) % L];
+            if (a !== b) {
+              nb[a].add(b);
+              nb[b].add(a);
+            }
+          }
+        });
+      } else {
+        // line graph: edges sharing a vertex
+        cx.vertEdges.forEach((ve) => {
+          for (let i = 0; i < ve.length; i++)
+            for (let j = i + 1; j < ve.length; j++) {
+              nb[ve[i]].add(ve[j]);
+              nb[ve[j]].add(ve[i]);
+            }
+        });
+      }
+      return {
+        mode,
+        n: nE,
+        neighbors: nb.map((s) => Array.from(s)),
+        positions: pos ? cx.edges.map(([a, b]) => midpoint(pos, a, b)) : null,
+        dim: new Int8Array(nE).fill(1),
+        meta: meta(cx),
+      };
+    }
+
+    if (mode === "faces") {
+      const nF = cx.faces.length;
+      const nb = Array.from({ length: nF }, () => new Set());
+      cx.edgeFaces.forEach((fs) => {
+        for (let i = 0; i < fs.length; i++)
+          for (let j = i + 1; j < fs.length; j++)
+            if (fs[i] !== fs[j]) {
+              nb[fs[i]].add(fs[j]);
+              nb[fs[j]].add(fs[i]);
+            }
+      });
+      return {
+        mode,
+        n: nF,
+        neighbors: nb.map((s) => Array.from(s)),
+        positions: pos ? cx.faces.map((f) => centroid(pos, f)) : null,
+        dim: new Int8Array(nF).fill(2),
+        meta: meta(cx),
+      };
+    }
+
+    if (mode === "cells") {
+      const nV = cx.nV;
+      const nE = cx.edges.length;
+      const nF = cx.faces.length;
+      const n = nV + nE + nF;
+      const nb = Array.from({ length: n }, () => []);
+      cx.edges.forEach(([a, b], ei) => {
+        const e = nV + ei;
+        nb[a].push(e);
+        nb[b].push(e);
+        nb[e].push(a, b);
+      });
+      cx.faceEdges.forEach((fe, fi) => {
+        const F = nV + nE + fi;
+        uniq(fe).forEach((ei) => {
+          nb[nV + ei].push(F);
+          nb[F].push(nV + ei);
+        });
+      });
+      const positions = pos
+        ? pos
+            .map((p) => p.slice())
+            .concat(cx.edges.map(([a, b]) => midpoint(pos, a, b)))
+            .concat(cx.faces.map((f) => centroid(pos, f)))
+        : null;
+      const dim = new Int8Array(n);
+      for (let i = 0; i < nE; i++) dim[nV + i] = 1;
+      for (let i = 0; i < nF; i++) dim[nV + nE + i] = 2;
+      return { mode, n, neighbors: nb.map(uniq), positions, dim, meta: meta(cx) };
+    }
+
+    throw new Error("GeoCells: unknown mode '" + mode + "' (expected " + MODES.join(" | ") + ")");
+  }
+
+  return { version: "0.1.0", MODES, fromMesh, build };
+});
+
+</script>
+<script>
+/*! GeoAI v0.1 — Hierarchical Graph Neural Network opponent for Geodesics.
+ *
+ * A forward-pass graph neural network over an arbitrary board graph (any
+ * surface / mesh / resolution / dimension produced by make_board). The
+ * adjacency list is the complete rule-relevant structure, so one engine
+ * plays every topology, orientable or not.
+ *
+ *   tactical layer   exact per-candidate features from group analysis:
+ *                    captures, atari escapes/threats, liberties-after,
+ *                    self-atari, own-eye detection
+ *   message passing  higher-order aggregation over BOTH the 1-ring (N1)
+ *                    and the exact 2-ring (N2) neighborhoods, with tanh
+ *                    nonlinearities between blocks
+ *   hierarchy        two cooperating multi-scale structures:
+ *                    (1) a multi-persistence Morse–Smale hierarchy of the
+ *                        influence function — after Leventhal, Gyulassy,
+ *                        Pascucci & Heimann, "Modeling Hierarchical
+ *                        Topological Structure in Scientific Images with
+ *                        Graph Neural Networks" (NeurIPS 2022) — treating
+ *                        the board graph as the domain: steepest-ascent
+ *                        basins are cancelled by topological persistence
+ *                        into NESTED partitions on one shared vertex set
+ *                        (same label at p_i ⇒ same label at p_j ≥ p_i),
+ *                        and every message-passing block combines fine
+ *                        neighborhoods with region messages from all
+ *                        persistence levels — the paper's hierarchical
+ *                        joint training (HJT) scheme with fixed weights
+ *                    (2) a structural graph-U-Net coarsening pyramid via
+ *                        greedy maximal matching (roughly the inverse of
+ *                        geodesic subdivision), which still applies when
+ *                        the board is empty and the field has no topology
+ *   heads            per-vertex policy logits + a scalar value in (-1, 1)
+ *   future estimate  optional 1-ply lookahead: top-k policy moves are
+ *                    simulated exactly and re-ranked by value gain minus
+ *                    the opponent's immediate reply threat
+ *
+ * Weights are hand-initialised Go priors. engine.setWeights(w) accepts a
+ * trained parameter set with the identical schema (e.g. exported from the
+ * Python layer after self-play training) — the architecture, not the
+ * numbers, is fixed.
+ *
+ * Colors: 0 empty, 1 black, 2 white. Pass = -1.
+ * Ko/superko legality belongs to the host: pass a legalMask into
+ * pickMove(). Without one the engine only forbids occupied vertices,
+ * suicide, and filling its own eyes.
+ *
+ * No dependencies. Browser: window.GeoAI. Node: module.exports.
+ */
+(function (root, factory) {
+  if (typeof module === "object" && module.exports) module.exports = factory();
+  else root.GeoAI = factory();
+})(typeof self !== "undefined" ? self : this, function () {
+  "use strict";
+
+  // ---------- utilities ------------------------------------------------------
+
+  function mulberry32(seed) {
+    let t = seed >>> 0;
+    return function () {
+      t += 0x6d2b79f5;
+      let r = Math.imul(t ^ (t >>> 15), 1 | t);
+      r ^= r + Math.imul(r ^ (r >>> 7), 61 | r);
+      return ((r ^ (r >>> 14)) >>> 0) / 4294967296;
+    };
+  }
+
+  function tanhInPlace(f) {
+    for (let i = 0; i < f.length; i++) f[i] = Math.tanh(f[i]);
+    return f;
+  }
+
+  function deepMerge(dst, src) {
+    for (const k in src) {
+      if (src[k] && typeof src[k] === "object" && !Array.isArray(src[k])) {
+        if (!dst[k] || typeof dst[k] !== "object") dst[k] = {};
+        deepMerge(dst[k], src[k]);
+      } else dst[k] = src[k];
+    }
+    return dst;
+  }
+
+  // ---------- graph structure: rings and pyramid -----------------------------
+
+  /** Sanitize an adjacency list: drop self-loops, duplicates, out-of-range. */
+  function cleanAdjacency(neighbors) {
+    const n = neighbors.length;
+    const N1 = new Array(n);
+    for (let v = 0; v < n; v++) {
+      const s = new Set();
+      const a = neighbors[v] || [];
+      for (let i = 0; i < a.length; i++) {
+        const u = a[i] | 0;
+        if (u !== v && u >= 0 && u < n) s.add(u);
+      }
+      N1[v] = Array.from(s);
+    }
+    return N1;
+  }
+
+  /** Exact 2-ring (distance exactly 2) per vertex — the higher-order hop. */
+  function buildRings(N1) {
+    const n = N1.length;
+    const N2 = new Array(n);
+    const mark = new Int32Array(n).fill(-1);
+    for (let v = 0; v < n; v++) {
+      mark[v] = v;
+      const nb = N1[v];
+      for (let i = 0; i < nb.length; i++) mark[nb[i]] = v;
+      const ring = [];
+      for (let i = 0; i < nb.length; i++) {
+        const w1 = N1[nb[i]];
+        for (let j = 0; j < w1.length; j++) {
+          const w = w1[j];
+          if (mark[w] !== v) {
+            mark[w] = v;
+            ring.push(w);
+          }
+        }
+      }
+      N2[v] = ring;
+    }
+    return N2;
+  }
+
+  /** One coarsening step by greedy maximal matching (deterministic). */
+  function coarsen(N1) {
+    const n = N1.length;
+    const assign = new Int32Array(n).fill(-1);
+    let c = 0;
+    for (let v = 0; v < n; v++) {
+      if (assign[v] !== -1) continue;
+      let mate = -1;
+      const nb = N1[v];
+      for (let i = 0; i < nb.length; i++)
+        if (assign[nb[i]] === -1) {
+          mate = nb[i];
+          break;
+        }
+      assign[v] = c;
+      if (mate !== -1) assign[mate] = c;
+      c++;
+    }
+    const sets = new Array(c);
+    for (let i = 0; i < c; i++) sets[i] = new Set();
+    for (let v = 0; v < n; v++) {
+      const nb = N1[v];
+      for (let i = 0; i < nb.length; i++) {
+        const a = assign[v], b = assign[nb[i]];
+        if (a !== b) sets[a].add(b);
+      }
+    }
+    return { assign, N1: sets.map((s) => Array.from(s)), size: c };
+  }
+
+  /** Coarsening pyramid + composed fine→level-l vertex maps. */
+  function buildPyramid(N1, maxLevels, minSize) {
+    const levels = [{ N1: N1, n: N1.length }];
+    while (levels.length < maxLevels && levels[levels.length - 1].n > minSize) {
+      const top = levels[levels.length - 1];
+      const c = coarsen(top.N1);
+      if (c.size >= top.n) break;
+      top.assign = c.assign;
+      levels.push({ N1: c.N1, n: c.size });
+    }
+    const mapTo = [null]; // level 0 is the identity
+    let prev = null;
+    for (let l = 1; l < levels.length; l++) {
+      const a = levels[l - 1].assign;
+      const m = new Int32Array(levels[0].n);
+      for (let v = 0; v < m.length; v++) m[v] = a[prev ? prev[v] : v];
+      mapTo.push(m);
+      prev = m;
+    }
+    return { levels, mapTo };
+  }
+
+  // ---------- multi-persistence Morse–Smale hierarchy ------------------------
+  // Graph-native analogue of the topological graph hierarchy in Leventhal,
+  // Gyulassy, Pascucci & Heimann (NeurIPS 2022), with the board graph as the
+  // discrete domain and the influence function as the scalar field.
+
+  /**
+   * Ascending-basin hierarchy of a scalar function f on the graph.
+   * Steepest ascent assigns every vertex to a local maximum (ties broken by
+   * index, giving a total order on plateaus). A descending union-find sweep
+   * then pairs each maximum with the merge value that cancels it — its
+   * topological persistence — recording which surviving maximum absorbs it.
+   * labelsAt(p) cancels every maximum of persistence < p, so raising p only
+   * merges regions: the nested multi-persistence hierarchy of the paper,
+   * with all levels living on one shared vertex set.
+   */
+  function basinHierarchy(f, N1) {
+    const n = f.length;
+    const higher = (a, b) => f[a] > f[b] || (f[a] === f[b] && a > b);
+    const up = new Int32Array(n).fill(-1);
+    for (let v = 0; v < n; v++) {
+      let best = v;
+      const nb = N1[v];
+      for (let i = 0; i < nb.length; i++) if (higher(nb[i], best)) best = nb[i];
+      if (best !== v) up[v] = best;
+    }
+    const basin = new Int32Array(n).fill(-1);
+    for (let v = 0; v < n; v++) {
+      let x = v;
+      const path = [];
+      while (basin[x] === -1 && up[x] !== -1) {
+        path.push(x);
+        x = up[x];
+      }
+      const m = basin[x] === -1 ? x : basin[x];
+      basin[x] = m;
+      for (let i = 0; i < path.length; i++) basin[path[i]] = m;
+    }
+    // descending sweep: components labelled by their highest maximum
+    const order = Array.from({ length: n }, (_, v) => v).sort((a, b) => (higher(a, b) ? -1 : 1));
+    const parent = new Int32Array(n).fill(-1);
+    const cmax = new Int32Array(n).fill(-1);
+    const pers = new Float64Array(n).fill(Infinity); // indexed by maximum vertex
+    const mergedInto = new Int32Array(n).fill(-1);
+    const find = (x) => {
+      while (parent[x] !== x) {
+        parent[x] = parent[parent[x]];
+        x = parent[x];
+      }
+      return x;
+    };
+    const maxima = [];
+    for (let oi = 0; oi < n; oi++) {
+      const v = order[oi];
+      parent[v] = v;
+      cmax[v] = v;
+      if (up[v] === -1) maxima.push(v);
+      const nb = N1[v];
+      for (let i = 0; i < nb.length; i++) {
+        const u = nb[i];
+        if (parent[u] === -1) continue; // still below the sweep
+        const ru = find(u);
+        const rv = find(v);
+        if (ru === rv) continue;
+        let live = ru;
+        let die = rv;
+        if (higher(cmax[die], cmax[live])) {
+          live = rv;
+          die = ru;
+        }
+        pers[cmax[die]] = f[cmax[die]] - f[v];
+        mergedInto[cmax[die]] = cmax[live];
+        parent[die] = live;
+      }
+    }
+    const finitePers = [];
+    for (let i = 0; i < maxima.length; i++)
+      if (pers[maxima[i]] < Infinity) finitePers.push(pers[maxima[i]]);
+    finitePers.sort((a, b) => a - b);
+    function labelsAt(p) {
+      const lab = new Int32Array(n);
+      for (let v = 0; v < n; v++) {
+        let m = basin[v];
+        while (mergedInto[m] !== -1 && pers[m] < p) m = mergedInto[m];
+        lab[v] = m;
+      }
+      return lab;
+    }
+    return { basin, up, maxima, finitePers, labelsAt };
+  }
+
+  // ---------- message passing -------------------------------------------------
+
+  /**
+   * `steps` rounds of h' = wSelf·h + w1·mean_{N1} h + w2·mean_{N2} h.
+   * N2 may be null (1-hop only). Returns a fresh Float32Array.
+   */
+  function diffuse(h, N1, N2, steps, wSelf, w1, w2) {
+    const n = h.length;
+    let a = Float32Array.from(h);
+    let b = new Float32Array(n);
+    for (let t = 0; t < steps; t++) {
+      for (let v = 0; v < n; v++) {
+        const l1 = N1[v];
+        let s1 = 0;
+        for (let i = 0; i < l1.length; i++) s1 += a[l1[i]];
+        const m1 = l1.length ? s1 / l1.length : 0;
+        let m2 = 0;
+        if (N2 && w2 !== 0) {
+          const l2 = N2[v];
+          if (l2.length) {
+            let s2 = 0;
+            for (let i = 0; i < l2.length; i++) s2 += a[l2[i]];
+            m2 = s2 / l2.length;
+          }
+        }
+        b[v] = wSelf * a[v] + w1 * m1 + w2 * m2;
+      }
+      const tmp = a;
+      a = b;
+      b = tmp;
+    }
+    return a;
+  }
+
+  // ---------- rules kernel (exact; used for features and lookahead) ----------
+
+  function makeKernel(N1) {
+    const n = N1.length;
+    const seen = new Int32Array(n);
+    let stamp = 0;
+
+    /** Vertices of the group at `start` if it has NO liberties, else null. */
+    function deadGroup(s, start, color) {
+      stamp++;
+      const st = [start];
+      seen[start] = stamp;
+      const g = [];
+      while (st.length) {
+        const x = st.pop();
+        g.push(x);
+        const nb = N1[x];
+        for (let i = 0; i < nb.length; i++) {
+          const u = nb[i];
+          if (s[u] === 0) return null;
+          if (s[u] === color && seen[u] !== stamp) {
+            seen[u] = stamp;
+            st.push(u);
+          }
+        }
+      }
+      return g;
+    }
+
+    /** Exact move application with captures. Returns null on suicide/occupied. */
+    function applyMove(stones, v, color) {
+      if (stones[v] !== 0) return null;
+      const s = Int8Array.from(stones);
+      s[v] = color;
+      const opp = 3 - color;
+      const captured = [];
+      const nb = N1[v];
+      for (let i = 0; i < nb.length; i++) {
+        const u = nb[i];
+        if (s[u] === opp) {
+          const g = deadGroup(s, u, opp);
+          if (g) for (let j = 0; j < g.length; j++) { s[g[j]] = 0; captured.push(g[j]); }
+        }
+      }
+      if (deadGroup(s, v, color)) return null; // suicide
+      return { stones: s, captured };
+    }
+
+    /** Group decomposition with liberty sets. */
+    function analyze(stones) {
+      const gid = new Int32Array(n).fill(-1);
+      const groups = [];
+      for (let v = 0; v < n; v++) {
+        if (stones[v] === 0 || gid[v] !== -1) continue;
+        const color = stones[v];
+        const id = groups.length;
+        const g = { color, size: 0, libs: new Set() };
+        groups.push(g);
+        const st = [v];
+        gid[v] = id;
+        while (st.length) {
+          const x = st.pop();
+          g.size++;
+          const nb = N1[x];
+          for (let i = 0; i < nb.length; i++) {
+            const u = nb[i];
+            if (stones[u] === 0) g.libs.add(u);
+            else if (stones[u] === color && gid[u] === -1) {
+              gid[u] = id;
+              st.push(u);
+            }
+          }
+        }
+      }
+      return { gid, groups };
+    }
+
+    return { n, N1, deadGroup, applyMove, analyze };
+  }
+
+  // ---------- default parameters (hand-set Go priors) ------------------------
+
+  const DEFAULT_WEIGHTS = {
+    diffusion: {
+      blocks: [
+        { steps: 3, self: 0.5, n1: 0.36, n2: 0.14 },
+        { steps: 2, self: 0.55, n1: 0.33, n2: 0.12 },
+      ],
+    },
+    pyramid: { maxLevels: 4, minSize: 24, steps: 3, self: 0.5, n1: 0.5, mix: [1.0, 0.6, 0.38, 0.24] },
+    msc: {
+      enabled: true,
+      minVerts: 8,   // skip the topological hierarchy on tiny boards
+      minBasins: 3,  // ...and on fields too flat to have structure
+      quantiles: [0, 0.6, 0.9], // persistence levels, finest → coarsest
+      mix: [0.4, 0.28, 0.18],   // HJT combine weight per persistence level
+      regionSmooth: 0.3,        // one message-passing step on each region graph
+      smooth: { steps: 2, self: 0.5, n1: 0.36, n2: 0.14 }, // builds the scalar field
+    },
+    sigma: 0.35, // width of the "contested" band around M = 0
+    head: {
+      capture: 6.0,     // per stone captured
+      escape: 5.0,      // per own stone rescued from atari
+      atari: 1.2,       // per opponent stone put in atari
+      libs: 1.2,        // liberties of the resulting group (saturating)
+      frontier: 1.6,    // play where influence is contested
+      grad: 1.1,        // play on steep influence gradients (moyo borders)
+      mscBoundary: 0.9, // play on contested separatrices between opposing basins
+      expand: 0.8,      // empty space in the 1- and 2-rings
+      lowDeg: 0.35,     // penalty per missing degree vs the median (boundary lines)
+      selfAtari: 5.0,   // penalty, scaled by the group being endangered
+      passThresh: 0.35, // pass when ahead and nothing scores above this
+      valueGain: 2.2,   // lookahead: weight of the value swing
+      replyFear: 1.4,   // lookahead: weight of opponent's immediate reply threat
+      lookBias: 0.15,   // lookahead: retain a little of the raw policy score
+    },
+    select: {
+      casual:   { topk: 0,  temp: 1.1,  noise: 0.3 },
+      standard: { topk: 8,  temp: 0.45, noise: 0.1 },
+      strong:   { topk: 14, temp: 0.15, noise: 0.03 },
+    },
+  };
+
+  // ---------- engine ----------------------------------------------------------
+
+  /**
+   * createEngine(neighbors, options?)
+   *   neighbors : adjacency list, Array<Array<int>> — the play graph
+   *   options   : { level: 'casual'|'standard'|'strong', seed, weights, select }
+   */
+  function createEngine(neighbors, options) {
+    options = options || {};
+    const N1 = cleanAdjacency(neighbors);
+    const n = N1.length;
+    const N2 = buildRings(N1);
+    const weights = deepMerge(JSON.parse(JSON.stringify(DEFAULT_WEIGHTS)), options.weights || {});
+    const pyr = buildPyramid(N1, weights.pyramid.maxLevels, weights.pyramid.minSize);
+    const kernel = makeKernel(N1);
+    const rng = mulberry32(options.seed == null ? 0x9e3779b9 : options.seed);
+    const level = options.level || "standard";
+
+    const deg = new Int32Array(n);
+    for (let v = 0; v < n; v++) deg[v] = N1[v].length;
+    const sorted = Array.from(deg).sort((a, b) => a - b);
+    const medianDeg = n ? sorted[n >> 1] : 0;
+
+    function selectCfg() {
+      const base = weights.select[level] || weights.select.standard;
+      return options.select ? deepMerge(Object.assign({}, base), options.select) : base;
+    }
+
+    function toInt8(a) {
+      if (a instanceof Int8Array && a.length === n) return a;
+      const s = new Int8Array(n);
+      for (let v = 0; v < n; v++) s[v] = a[v] | 0;
+      return s;
+    }
+
+    function normalizeMask(m) {
+      if (!m) return null;
+      if (typeof m === "function") return m;
+      return (v) => !!m[v];
+    }
+
+    // -- multi-persistence topological hierarchy (per evaluation) --------------
+
+    /** Compact region structure for one basin partition. */
+    function makeRegions(labels, f) {
+      const idOf = new Map();
+      const rid = new Int32Array(n);
+      for (let v = 0; v < n; v++) {
+        let id = idOf.get(labels[v]);
+        if (id === undefined) {
+          id = idOf.size;
+          idOf.set(labels[v], id);
+        }
+        rid[v] = id;
+      }
+      const R = idOf.size;
+      const adjS = new Array(R);
+      for (let i = 0; i < R; i++) adjS[i] = new Set();
+      for (let v = 0; v < n; v++) {
+        const nb = N1[v];
+        for (let i = 0; i < nb.length; i++)
+          if (rid[nb[i]] !== rid[v]) adjS[rid[v]].add(rid[nb[i]]);
+      }
+      const peak = new Float32Array(R);
+      idOf.forEach((id, maxV) => {
+        peak[id] = f[maxV];
+      });
+      return { R, rid, adj: adjS.map((s) => Array.from(s)), peak };
+    }
+
+    /**
+     * The paper's nested hierarchy, computed on the fly for the current
+     * position: ascending and descending basins of the influence function at
+     * every persistence quantile, plus the finest-level contested
+     * separatrices (vertices bordering a basin whose peak takes the opposite
+     * sign — the black/white watershed).
+     */
+    function buildMscHierarchy(f0) {
+      const C = weights.msc;
+      if (!C.enabled || n < C.minVerts) return null;
+      const asc = basinHierarchy(f0, N1);
+      const neg = new Float32Array(n);
+      for (let v = 0; v < n; v++) neg[v] = -f0[v];
+      const desc = basinHierarchy(neg, N1);
+      if (asc.maxima.length + desc.maxima.length < C.minBasins) return null;
+      const persAll = asc.finitePers.concat(desc.finitePers).sort((a, b) => a - b);
+      const q = (x) =>
+        persAll.length ? persAll[Math.min(persAll.length - 1, Math.floor(x * persAll.length))] : Infinity;
+      const levels = [];
+      for (let i = 0; i < C.quantiles.length; i++) {
+        const p = C.quantiles[i] <= 0 ? 0 : q(C.quantiles[i]);
+        levels.push({ p, asc: makeRegions(asc.labelsAt(p), f0), desc: makeRegions(desc.labelsAt(p), neg) });
+      }
+      const L0 = levels[0];
+      const boundary = new Float32Array(n);
+      for (let v = 0; v < n; v++) {
+        const mine = L0.asc.peak[L0.asc.rid[v]];
+        const nb = N1[v];
+        for (let i = 0; i < nb.length; i++) {
+          const r = L0.asc.rid[nb[i]];
+          if (r !== L0.asc.rid[v] && (mine * L0.asc.peak[r] <= 0 || Math.abs(L0.asc.peak[r]) < 0.02)) {
+            boundary[v] = 1;
+            break;
+          }
+        }
+      }
+      return { levels, boundary };
+    }
+
+    /** Pool h over a region partition, one smoothing step on the region graph, unpool. */
+    function regionMessage(h, reg, smooth) {
+      const sum = new Float32Array(reg.R);
+      const cnt = new Float32Array(reg.R);
+      for (let v = 0; v < n; v++) {
+        sum[reg.rid[v]] += h[v];
+        cnt[reg.rid[v]]++;
+      }
+      const m = new Float32Array(reg.R);
+      for (let i = 0; i < reg.R; i++) m[i] = cnt[i] ? sum[i] / cnt[i] : 0;
+      const m2 = new Float32Array(reg.R);
+      for (let i = 0; i < reg.R; i++) {
+        const a = reg.adj[i];
+        let s = 0;
+        for (let j = 0; j < a.length; j++) s += m[a[j]];
+        m2[i] = a.length ? (1 - smooth) * m[i] + (smooth * s) / a.length : m[i];
+      }
+      const out = new Float32Array(n);
+      for (let v = 0; v < n; v++) out[v] = m2[reg.rid[v]];
+      return out;
+    }
+
+    // -- feature network ------------------------------------------------------
+
+    /** Health-weighted ±1 stone field from the mover's perspective. */
+    function stoneField(stones, color, A) {
+      const f = new Float32Array(n);
+      for (let v = 0; v < n; v++) {
+        const c = stones[v];
+        if (!c) continue;
+        const g = A.groups[A.gid[v]];
+        const health = Math.min(g.libs.size, 3) / 3;
+        f[v] = (c === color ? 1 : -1) * (0.4 + 0.6 * health);
+      }
+      return f;
+    }
+
+    /** Multi-scale influence field M, contested-frontier map, gradient, value. */
+    function computeFields(stones, color, A) {
+      const base = stoneField(stones, color, A);
+
+      // the scalar function whose topology drives the hierarchy: a light
+      // higher-order smoothing of the stone field
+      const S = weights.msc.smooth;
+      const f0 = diffuse(base, N1, N2, S.steps, S.self, S.n1, S.n2);
+      const msc = buildMscHierarchy(f0);
+
+      // fine level: higher-order (N1 + N2) message-passing blocks, each one
+      // jointly combined — HJT-style — with region messages from every
+      // persistence level of the hierarchy before the nonlinearity
+      let fine = base;
+      for (let bi = 0; bi < weights.diffusion.blocks.length; bi++) {
+        const b = weights.diffusion.blocks[bi];
+        fine = diffuse(fine, N1, N2, b.steps, b.self, b.n1, b.n2);
+        if (msc) {
+          const mixes = weights.msc.mix;
+          for (let li = 0; li < msc.levels.length; li++) {
+            const w = mixes[Math.min(li, mixes.length - 1)];
+            if (!w) continue;
+            const L = msc.levels[li];
+            const ma = regionMessage(fine, L.asc, weights.msc.regionSmooth);
+            const md = regionMessage(fine, L.desc, weights.msc.regionSmooth);
+            for (let v = 0; v < n; v++) fine[v] += w * 0.5 * (ma[v] + md[v]);
+          }
+        }
+        tanhInPlace(fine);
+      }
+
+      // pyramid: pool base to every coarse level, diffuse there, unpool
+      const P = weights.pyramid;
+      const M = new Float32Array(n);
+      for (let v = 0; v < n; v++) M[v] = P.mix[0] * fine[v];
+      for (let l = 1; l < pyr.levels.length; l++) {
+        const mixW = P.mix[Math.min(l, P.mix.length - 1)];
+        const map = pyr.mapTo[l];
+        const cn = pyr.levels[l].n;
+        const sum = new Float32Array(cn);
+        const cnt = new Float32Array(cn);
+        for (let v = 0; v < n; v++) {
+          sum[map[v]] += base[v];
+          cnt[map[v]]++;
+        }
+        let cf = new Float32Array(cn);
+        for (let i = 0; i < cn; i++) cf[i] = cnt[i] ? sum[i] / cnt[i] : 0;
+        cf = diffuse(cf, pyr.levels[l].N1, null, P.steps, P.self, P.n1, 0);
+        tanhInPlace(cf);
+        for (let v = 0; v < n; v++) M[v] += mixW * cf[map[v]];
+      }
+      tanhInPlace(M);
+
+      const frontier = new Float32Array(n);
+      const grad = new Float32Array(n);
+      const inv2s2 = 1 / (2 * weights.sigma * weights.sigma);
+      let V = 0;
+      for (let v = 0; v < n; v++) {
+        frontier[v] = Math.exp(-M[v] * M[v] * inv2s2);
+        const nb = N1[v];
+        let g = 0;
+        for (let i = 0; i < nb.length; i++) g += Math.abs(M[v] - M[nb[i]]);
+        grad[v] = nb.length ? g / nb.length : 0;
+        V += M[v];
+      }
+      V /= Math.max(1, n);
+      return { M, frontier, grad, V, msc };
+    }
+
+    /** Exact tactical features per empty vertex (null = occupied or suicide). */
+    function candidateFeatures(stones, color, A) {
+      const feats = new Array(n).fill(null);
+      const libSet = new Set();
+      for (let v = 0; v < n; v++) {
+        if (stones[v] !== 0) continue;
+        const nb = N1[v];
+        let emptyN1 = 0;
+        const ownG = new Set();
+        const oppG = new Set();
+        for (let i = 0; i < nb.length; i++) {
+          const u = nb[i];
+          const c = stones[u];
+          if (c === 0) emptyN1++;
+          else if (c === color) ownG.add(A.gid[u]);
+          else oppG.add(A.gid[u]);
+        }
+        let captures = 0;
+        let atariThreat = 0;
+        oppG.forEach((gi) => {
+          const g = A.groups[gi];
+          if (g.libs.size === 1) captures += g.size;
+          else if (g.libs.size === 2) atariThreat += g.size;
+        });
+        libSet.clear();
+        for (let i = 0; i < nb.length; i++) if (stones[nb[i]] === 0) libSet.add(nb[i]);
+        let mergedSize = 1;
+        let ownInAtari = 0;
+        let minOwnLibs = Infinity;
+        ownG.forEach((gi) => {
+          const g = A.groups[gi];
+          mergedSize += g.size;
+          if (g.libs.size === 1) ownInAtari += g.size;
+          if (g.libs.size < minOwnLibs) minOwnLibs = g.libs.size;
+          g.libs.forEach((l) => libSet.add(l));
+        });
+        libSet.delete(v);
+        let libsAfter = libSet.size;
+        if (captures > 0) libsAfter = Math.max(libsAfter, Math.min(captures, 2));
+        if (captures === 0 && libsAfter === 0) continue; // suicide → stays null
+        const selfAtari = captures === 0 && libsAfter === 1;
+        const escape = ownInAtari > 0 && (libsAfter >= 2 || captures > 0) ? ownInAtari : 0;
+        const eyeFill =
+          emptyN1 === 0 && oppG.size === 0 && captures === 0 && ownG.size > 0 && minOwnLibs >= 2;
+        const r2 = N2[v];
+        let e2 = 0;
+        for (let i = 0; i < r2.length; i++) if (stones[r2[i]] === 0) e2++;
+        const expansion = (emptyN1 + 0.5 * e2) / Math.max(1, nb.length + 0.5 * r2.length);
+        feats[v] = { captures, atariThreat, libsAfter, selfAtari, escape, eyeFill, expansion, mergedSize };
+      }
+      return feats;
+    }
+
+    /** Policy head: linear readout over tactical features + network fields. */
+    function headScore(f, fields, v) {
+      const W = weights.head;
+      let s = 0;
+      s += W.capture * Math.min(f.captures, 10);
+      s += W.escape * Math.min(f.escape, 10);
+      s += W.atari * Math.min(f.atariThreat, 6);
+      s += (W.libs * Math.min(f.libsAfter, 6)) / 6;
+      s += W.frontier * fields.frontier[v];
+      s += W.grad * Math.min(fields.grad[v] * 4, 1);
+      if (fields.msc) s += W.mscBoundary * fields.msc.boundary[v];
+      s += W.expand * f.expansion;
+      s -= W.lowDeg * Math.max(0, medianDeg - deg[v]);
+      if (f.selfAtari) s -= W.selfAtari * (1 + f.mergedSize / 4);
+      return s;
+    }
+
+    /** Cheap position value used inside the 1-ply lookahead. */
+    function quickValue(stones, color) {
+      const A = kernel.analyze(stones);
+      const base = stoneField(stones, color, A);
+      const f = diffuse(base, N1, null, 2, 0.55, 0.45, 0);
+      let V = 0;
+      for (let v = 0; v < n; v++) V += Math.tanh(1.8 * f[v]);
+      V /= Math.max(1, n);
+      if (pyr.levels.length > 1) {
+        const map = pyr.mapTo[1];
+        const cn = pyr.levels[1].n;
+        const sum = new Float32Array(cn);
+        const cnt = new Float32Array(cn);
+        for (let v = 0; v < n; v++) {
+          sum[map[v]] += base[v];
+          cnt[map[v]]++;
+        }
+        let cf = new Float32Array(cn);
+        for (let i = 0; i < cn; i++) cf[i] = cnt[i] ? sum[i] / cnt[i] : 0;
+        cf = diffuse(cf, pyr.levels[1].N1, null, 3, 0.5, 0.5, 0);
+        let CV = 0;
+        for (let i = 0; i < cn; i++) CV += Math.tanh(2.2 * cf[i]);
+        CV /= cn;
+        V = 0.5 * V + 0.5 * CV;
+      }
+      return V;
+    }
+
+    /** Fraction of own stones the opponent could capture immediately. */
+    function replyThreat(stones, color) {
+      const A = kernel.analyze(stones);
+      let t = 0;
+      for (let i = 0; i < A.groups.length; i++) {
+        const g = A.groups[i];
+        if (g.color === color && g.libs.size === 1) t += g.size;
+      }
+      return Math.min(t, 8) / 8;
+    }
+
+    /** Score every playable vertex. eyeFill entries carry score -1e9. */
+    function evaluatePolicy(stones, color, isLegal, noise) {
+      const A = kernel.analyze(stones);
+      const fields = computeFields(stones, color, A);
+      const feats = candidateFeatures(stones, color, A);
+      const list = [];
+      let sawLegal = false;
+      for (let v = 0; v < n; v++) {
+        if (stones[v] !== 0) continue;
+        if (isLegal && !isLegal(v)) continue;
+        const f = feats[v];
+        if (!f) continue; // suicide
+        sawLegal = true;
+        const s = f.eyeFill ? -1e9 : headScore(f, fields, v) + noise * (rng() - 0.5) * 2;
+        list.push({ v, s, f });
+      }
+      list.sort((a, b) => b.s - a.s);
+      return { fields, list, sawLegal };
+    }
+
+    function softmaxSample(cands, temp) {
+      if (cands.length === 1 || temp <= 1e-4) return cands[0].v;
+      const m = cands[0].s;
+      const ps = new Array(cands.length);
+      let Z = 0;
+      for (let i = 0; i < cands.length; i++) {
+        const p = Math.exp((cands[i].s - m) / temp);
+        ps[i] = p;
+        Z += p;
+      }
+      let r = rng() * Z;
+      for (let i = 0; i < cands.length; i++) {
+        r -= ps[i];
+        if (r <= 0) return cands[i].v;
+      }
+      return cands[0].v;
+    }
+
+    // -- public API -----------------------------------------------------------
+
+    /**
+     * pickMove(stones, color, { legalMask }) → { move, value, reason?, candidates? }
+     *   stones    : array-like of 0/1/2 per vertex
+     *   color     : 1 or 2 (the engine's color, to move)
+     *   legalMask : Uint8Array | Array | (v)=>bool — host ko/superko legality
+     *   move      : vertex index, or -1 for pass
+     */
+    function pickMove(stonesIn, color, opts) {
+      opts = opts || {};
+      const stones = toInt8(stonesIn);
+      const isLegal = normalizeMask(opts.legalMask);
+      const sel = selectCfg();
+      const { fields, list, sawLegal } = evaluatePolicy(stones, color, isLegal, sel.noise);
+      const cands = list.filter((c) => c.s > -1e8);
+      if (!cands.length)
+        return { move: -1, value: fields.V, reason: sawLegal ? "only-eye-fills" : "no-legal-moves" };
+      if (cands[0].s < weights.head.passThresh && fields.V > 0.12)
+        return { move: -1, value: fields.V, reason: "nothing-gains" };
+
+      let ranked = cands;
+      if (sel.topk > 0 && n > 2) {
+        const K = Math.min(sel.topk, cands.length);
+        const baseQ = quickValue(stones, color);
+        const evals = [];
+        for (let i = 0; i < K; i++) {
+          const c = cands[i];
+          const sim = kernel.applyMove(stones, c.v, color);
+          if (!sim) continue;
+          const dq = quickValue(sim.stones, color) - baseQ;
+          const threat = replyThreat(sim.stones, color);
+          evals.push({
+            v: c.v,
+            s: weights.head.valueGain * dq - weights.head.replyFear * threat + weights.head.lookBias * c.s,
+          });
+        }
+        if (evals.length) {
+          evals.sort((a, b) => b.s - a.s);
+          ranked = evals;
+        }
+      }
+      const move = softmaxSample(ranked, sel.temp);
+      return {
+        move,
+        value: fields.V,
+        candidates: ranked.slice(0, 5).map((c) => ({ v: c.v, score: c.s })),
+      };
+    }
+
+    /** Raw policy scores (sorted desc) — handy for tests and heatmaps. */
+    function scoreMoves(stonesIn, color, opts) {
+      opts = opts || {};
+      const stones = toInt8(stonesIn);
+      const { list } = evaluatePolicy(stones, color, normalizeMask(opts.legalMask), 0);
+      return list.map((c) => ({ v: c.v, score: c.s, eyeFill: !!c.f.eyeFill, selfAtari: !!c.f.selfAtari }));
+    }
+
+    /** Influence field + value for the given side — for UI heatmaps. */
+    function evaluate(stonesIn, color) {
+      const stones = toInt8(stonesIn);
+      const A = kernel.analyze(stones);
+      const fields = computeFields(stones, color, A);
+      return {
+        value: fields.V,
+        M: fields.M,
+        frontier: fields.frontier,
+        msc: fields.msc
+          ? {
+              boundary: fields.msc.boundary,
+              ascRid: fields.msc.levels[0].asc.rid,
+              descRid: fields.msc.levels[0].desc.rid,
+              levels: fields.msc.levels.map((L) => ({
+                p: L.p,
+                ascRegions: L.asc.R,
+                descRegions: L.desc.R,
+              })),
+            }
+          : null,
+      };
+    }
+
+    return {
+      n,
+      levels: pyr.levels.map((l) => l.n),
+      level,
+      pickMove,
+      scoreMoves,
+      evaluate,
+      kernel,
+      setWeights: (w) => deepMerge(weights, w || {}),
+      getWeights: () => JSON.parse(JSON.stringify(weights)),
+    };
+  }
+
+  // ---------- model registry ---------------------------------------------------
+
+  const models = [
+    {
+      id: "hgnn1",
+      name: "Hierarchical GNN",
+      description:
+        "Fixed-weight hierarchical graph network: higher-order (1- and 2-ring) message passing joined across a multi-persistence Morse–Smale hierarchy of the influence field (Leventhal et al., NeurIPS 2022), a matching-coarsened structural pyramid, exact tactical features, and 1-ply future estimation.",
+      levels: ["casual", "standard", "strong"],
+      create: (neighbors, opts) => createEngine(neighbors, opts),
+    },
+  ];
+
+  return {
+    version: "0.2.0",
+    createEngine,
+    makeKernel: (neighbors) => makeKernel(cleanAdjacency(neighbors)),
+    models,
+    _internals: { buildRings, buildPyramid, coarsen, diffuse, cleanAdjacency, basinHierarchy },
+  };
+});
+
+</script>
+<script>
+// ---- models/random.js ----
+(function () {
+const WEIGHTS = null;
+// models/random.js — a drop-in opponent, and the template for writing more.
+//
+// Every models/*.js file is bundled by `node build.mjs` and runs after
+// GeoAI loads. The build wraps this file in a closure that defines WEIGHTS:
+// the parsed contents of a sibling `random.weights.json` if one exists,
+// otherwise null. To ship a pretrained variant of the built-in engine:
+//
+//   GeoAI.models.push({
+//     id: "hgnn1-sp1", name: "HGNN self-play v1", levels: ["standard"],
+//     create(neighbors, opts) {
+//       const e = GeoAI.createEngine(neighbors, opts);
+//       if (WEIGHTS) e.setWeights(WEIGHTS);   // schema: engine.getWeights()
+//       return e;
+//     },
+//   });
+//
+// The only contract: create(neighbors, opts) returns an object with
+// pickMove(stones, color, { legalMask }) -> { move, reason? } where move is
+// a site index or -1 for a pass (a Promise of that shape is also accepted).
+// stones is 0/1/2 per site; legality is enforced by the host either way.
+// Model ids must not contain ":". Optionally set supports:
+// { surfaces: [...], meshes: [...], incidence: [...] } to gate availability.
+
+GeoAI.models.push({
+  id: "random",
+  name: "Random",
+  levels: ["uniform"],
+  create(neighbors) {
+    // deterministic per board size, so games are reproducible-ish
+    let s = 0x9e3779b9 ^ neighbors.length;
+    const rnd = () => ((s = (Math.imul(s, 1664525) + 1013904223) >>> 0) / 4294967296);
+    return {
+      pickMove(stones, color, opts) {
+        const mask = opts && opts.legalMask;
+        const legal = [];
+        for (let v = 0; v < stones.length; v++)
+          if (stones[v] === 0 && (!mask || mask[v])) legal.push(v);
+        if (!legal.length) return { move: -1, reason: "no-legal-moves" };
+        return { move: legal[(rnd() * legal.length) | 0], reason: "uniform" };
+      },
+    };
+  },
+});
+
+})();
+</script>
+<script>
+// Geodesics web app v0.2 — the board design space, playable.
+// Depends on core.js (topologies, engine, colorings, share codec) and THREE.
+
+/* eslint-disable no-undef */
+
+// ---------- configuration: the design space exposed to the player -----------
+
+const RS = 1.55;                        // sphere embedding radius
+const TOR = { R: 1.12, r: 0.56 };       // torus embedding
+const MOB = { R: 1.30, w: 0.50 };       // Möbius embedding
+
+const SURFACES = {
+  sphere: {
+    label: "Sphere S\u00B2",
+    meshes: {
+      tri:    { scales: [2, 3, 4] },        // geodesic frequency
+      square: { scales: [3, 4, 5] },        // cube-sphere frequency
+      hex:    { scales: [2, 3, 4] },        // Goldberg frequency
+    },
+  },
+  plane: {
+    label: "Plane D\u00B2",
+    meshes: {
+      square: { scales: [[9, 9], [13, 13], [19, 19]] },  // the classical boards
+    },
+  },
+  torus: {
+    label: "Torus T\u00B2",
+    meshes: {
+      tri:    { scales: [[7, 7], [9, 9], [11, 11]] },
+      square: { scales: [[7, 7], [9, 9], [11, 11]] },
+      hex:    { scales: [[8, 6], [10, 8], [12, 10]] },   // parity: even sides
+    },
+  },
+  mobius: {
+    label: "M\u00F6bius band",
+    meshes: {
+      tri:    { scales: [[12, 5], [14, 5], [16, 7]] },
+      square: { scales: [[12, 5], [14, 5], [16, 7]] },
+      hex:    { scales: [[12, 5], [14, 5], [16, 7]] },   // nx even, ny odd
+    },
+  },
+  box: {
+    label: "Box E\u00B3 (3D)",
+    meshes: {
+      square: { scales: [3, 4, 5] },        // n x n x n lattice
+    },
+  },
+};
+const MESH_LABELS = { tri: "Triangular \u00B7 deg 6",
+                      square: "Square \u00B7 deg 4",
+                      hex: "Hexagonal \u00B7 deg 3" };
+const SCALE_LABELS = ["I", "II", "III"];
+const CELLS_OK = { "sphere:tri": 1, "sphere:square": 1, "sphere:hex": 1,
+                   "plane:square": 1,
+                   "torus:square": 1, "mobius:square": 1 };
+
+// incidence modes need face lists: all sphere meshes and the grid meshes
+// that close up. The Möbius honeycomb stays a vertex board — the flip
+// shears the bond parity at the seam, so its hexagons cannot close there
+// (verified per face at build time). The 3D box keeps its canonical board.
+const INC_OK = { "sphere:tri": 1, "sphere:square": 1, "sphere:hex": 1,
+                 "plane:square": 1,
+                 "torus:tri": 1, "torus:square": 1, "torus:hex": 1,
+                 "mobius:tri": 1, "mobius:square": 1 };
+const INC_MODES = ["vertices", "edges", "faces", "cells"];
+const INC_LABELS = { vertices: "Stones: vertices", edges: "Stones: edges",
+                     faces: "Stones: faces", cells: "Stones: all cells" };
+
+// Does a model entry support the given board spec? A null/absent supports
+// object means "everything"; otherwise each present list is a whitelist.
+function modelSupports(m, surface, mesh, incidence, scaleIdx) {
+  const s = m.supports;
+  if (!s) return true;
+  const okIn = (list, val) => !list || list.includes(val);
+  return okIn(s.surfaces, surface) && okIn(s.meshes, mesh) &&
+         okIn(s.incidence, incidence) && okIn(s.scaleIdx, scaleIdx);
+}
+
+// paint palette (muted instrument hues)
+const PALETTE = [0x5bb0a0, 0xc98a3d, 0x7a93c4, 0xc4707a, 0x9db06b,
+                 0x9a86c8, 0xb8a04a, 0x6aa8b8];
+
+// ---------- board construction ----------------------------------------------
+
+function degreeHist(adj) {
+  const h = {};
+  for (const l of adj) h[l.length] = (h[l.length] || 0) + 1;
+  return h;
+}
+function modalDegree(adj) {
+  const h = degreeHist(adj);
+  let best = 0, deg = 0;
+  for (const k in h) if (h[k] > best) { best = h[k]; deg = +k; }
+  return deg;
+}
+function minEdgeLen(pos, edges) {
+  let m = Infinity;
+  for (const [a, b] of edges) {
+    const d = Math.hypot(pos[a][0] - pos[b][0], pos[a][1] - pos[b][1],
+                         pos[a][2] - pos[b][2]);
+    if (d < m) m = d;
+  }
+  return m;
+}
+function degText(adj) {
+  const h = degreeHist(adj);
+  return Object.keys(h).map(Number).sort((a, b) => a - b).join("\u00B7");
+}
+
+// Nearest universal-cover representative of (x2,y2) as seen from (x1,y1),
+// under the given identifications. Evaluating the embedding on cover
+// coordinates makes edge curves cross seams (including the Möbius flip)
+// without special cases: torusPoint is periodic, mobiusPoint satisfies
+// P(u + nx, v) = P(u, ny-1-v).
+function coverRep(x1, y1, x2, y2, nx, ny, wrapX, wrapY, flipX) {
+  const cands = [[x2, y2]];
+  if (wrapX) {
+    cands.push([x2 + nx, flipX ? ny - 1 - y2 : y2]);
+    cands.push([x2 - nx, flipX ? ny - 1 - y2 : y2]);
+  }
+  if (wrapY) {
+    const more = [];
+    for (const [cx, cy] of cands) more.push([cx, cy + ny], [cx, cy - ny]);
+    cands.push(...more);
+  }
+  let best = cands[0], bd = Infinity;
+  for (const c of cands) {
+    const d = (c[0] - x1) * (c[0] - x1) + (c[1] - y1) * (c[1] - y1);
+    if (d < bd) { bd = d; best = c; }
+  }
+  return best;
+}
+
+function buildBoard(surface, meshType, scaleIdx) {
+  const scale = SURFACES[surface].meshes[meshType].scales[scaleIdx];
+  const B = { surface, meshType, scaleIdx, flatStones: false,
+              cells: null, defects: new Set() };
+
+  if (surface === "sphere") {
+    let g, meshSym;
+    if (meshType === "tri") {
+      g = geodesicSphere(scale);
+      meshSym = "{3,5+}(" + scale + ",0)";
+      B.faces = g.faces;
+    } else if (meshType === "square") {
+      g = cubeSphere(scale);
+      meshSym = "cube-sphere \u03BD" + scale;
+      B.faces = g.faces;
+    } else {
+      g = goldbergSphere(scale);
+      meshSym = "GP(" + scale + ",0)";
+      B.faces = g.faces;
+    }
+    B.adj = g.adj;
+    B.pos = g.positions.map(p => [p[0] * RS, p[1] * RS, p[2] * RS]);
+    B.kind = "sphere";
+    B.normalAt = i => {
+      const p = B.pos[i], r = Math.hypot(p[0], p[1], p[2]);
+      return [p[0] / r, p[1] / r, p[2] / r];
+    };
+    B.edgeCurve = (a, b, S) => {
+      const pa = g.positions[a], pb = g.positions[b], out = [];
+      for (let s = 0; s <= S; s++) {
+        const p = slerp(pa, pb, s / S);
+        out.push([p[0] * RS, p[1] * RS, p[2] * RS]);
+      }
+      return out;
+    };
+    const modal = modalDegree(B.adj);
+    B.adj.forEach((l, i) => { if (l.length !== modal) B.defects.add(i); });
+    const chiTxt = "\u03C7 2";
+    B.plate = [
+      { k: "plate.surface", t: "S\u00B2", edit: "surface" },
+      { k: "plate.mesh", t: meshSym, edit: "mesh" },
+      { k: "plate.V", t: "V " + B.adj.length, edit: "scale" },
+      { k: "plate.chi", t: chiTxt },
+      { k: "plate.boundary", t: "\u2202 0" },
+      { k: "plate.deg", t: "deg " + degText(B.adj) },
+    ];
+    if (B.faces) B.cells = { faces: B.faces };
+    if (B.faces) B.meshFaces = B.faces;          // incidence derivation
+  }
+
+  else if (surface === "torus" || surface === "mobius") {
+    const [nx, ny] = scale;
+    const wrapY = surface === "torus", flipX = surface === "mobius";
+    const g = gridQuotient(nx, ny, true, wrapY, flipX, false, meshType);
+    B.adj = g.adj; B.nx = nx; B.ny = ny;
+    const P = surface === "torus"
+      ? (u, v) => torusPoint(u, v, nx, ny, TOR.R, TOR.r)
+      : (u, v) => mobiusPoint(u, v, nx, ny, MOB.R, MOB.w);
+    const N = surface === "torus"
+      ? (u, v) => torusNormal(u, v, nx, ny)
+      : (u, v) => mobiusNormal(u, v, nx, ny, MOB.R, MOB.w);
+    B.pos = g.uv.map(([x, y]) => P(x, y));
+    B.uv = g.uv;
+    B._P = P; B._N = N; B._wrapX = true; B._wrapY = wrapY; B._flipX = flipX;
+    B.kind = surface;
+    B.flatStones = surface === "mobius";
+    B.normalAt = i => N(g.uv[i][0], g.uv[i][1]);
+    B.edgeCurve = (a, b, S) => {
+      const [x1, y1] = g.uv[a];
+      const [x2, y2] = coverRep(x1, y1, g.uv[b][0], g.uv[b][1],
+                                nx, ny, true, wrapY, flipX);
+      const out = [];
+      for (let s = 0; s <= S; s++) {
+        const t = s / S;
+        out.push(P(x1 + (x2 - x1) * t, y1 + (y2 - y1) * t));
+      }
+      return out;
+    };
+    if (surface === "mobius") {
+      const modal = modalDegree(B.adj);
+      B.adj.forEach((l, i) => { if (l.length < modal) B.defects.add(i); });
+    }
+    if (meshType === "square" || meshType === "tri" ||
+        (meshType === "hex" && wrapY)) {
+      // grid cells as faces (corner vertex ids, with seam identifications)
+      const vid = (x, y) => y * nx + x;
+      const red = (x, y) => {
+        if (x >= nx) { x -= nx; if (flipX) y = ny - 1 - y; }
+        if (y >= ny) { if (!wrapY) return null; y -= ny; }
+        else if (y < 0) { if (!wrapY) return null; y += ny; }
+        return [x, y];
+      };
+      const faces = [], patches = [], meshFaces = [], meshFaceUV = [];
+      const ymax = wrapY ? ny : ny - 1;
+      if (meshType === "hex") {
+        // brick-wall hexagons: left wall at (x,y) with x ≡ y (mod 2). Every
+        // boundary edge is checked against the quotient graph — on a Möbius
+        // band the flip shears the bond parity at the seam, hexagons there
+        // fail to close, and the honeycomb keeps its canonical vertex board.
+        const ek = new Set();
+        B.adj.forEach((l, a) => l.forEach(b =>
+          ek.add(a < b ? a + ":" + b : b + ":" + a)));
+        const has = (i, j) => ek.has(i < j ? i + ":" + j : j + ":" + i);
+        for (let y = 0; y < ymax; y++)
+          for (let x = y % 2; x < nx; x += 2) {
+            const uvs = [[x, y], [x + 1, y], [x + 2, y],
+                         [x + 2, y + 1], [x + 1, y + 1], [x, y + 1]];
+            const c = uvs.map(([cx, cy]) => red(cx, cy));
+            if (c.some(q => q === null)) continue;
+            const ids = c.map(([cx, cy]) => vid(cx, cy));
+            let closed = true;
+            for (let i = 0; i < 6; i++)
+              if (!has(ids[i], ids[(i + 1) % 6])) { closed = false; break; }
+            if (!closed) continue;
+            meshFaces.push(ids);
+            meshFaceUV.push(uvs);
+          }
+      } else {
+        const cellFaces = meshType === "square"
+          ? [[[0, 0], [1, 0], [1, 1], [0, 1]]]                      // one quad
+          : [[[0, 0], [1, 0], [1, 1]], [[0, 0], [1, 1], [0, 1]]];  // two triangles
+        for (let y = 0; y < ymax; y++)
+          for (let x = 0; x < nx; x++) {
+            for (const corners of cellFaces) {
+              const uvs = corners.map(([dx, dy]) => [x + dx, y + dy]);
+              const c = uvs.map(([cx, cy]) => red(cx, cy));
+              if (c.some(q => q === null)) continue;
+              const ids = c.map(([cx, cy]) => vid(cx, cy));
+              meshFaces.push(ids);
+              meshFaceUV.push(uvs);
+              if (meshType === "square") { faces.push(ids); patches.push([x, y]); }
+            }
+          }
+      }
+      if (meshType === "square") B.cells = { faces, patches, P };
+      if (meshFaces.length) {
+        B.meshFaces = meshFaces;
+        B.meshFaceUV = meshFaceUV;
+      }
+    }
+    const surfSym = surface === "torus" ? "T\u00B2" : "M\u00B2";
+    B.plate = [
+      { k: "plate.surface", t: surfSym, edit: "surface" },
+      { k: "plate.mesh", t: nx + "\u00D7" + ny + " " + meshType, edit: "mesh" },
+      { k: "plate.V", t: "V " + B.adj.length, edit: "scale" },
+      { k: "plate.chi", t: "\u03C7 0" },
+      { k: "plate.boundary", t: "\u2202 " + (surface === "torus" ? 0 : 1) },
+      { k: "plate.deg", t: "deg " + degText(B.adj) },
+    ];
+  }
+
+  else if (surface === "plane") {          // the classical boards
+    const [nx, ny] = scale;
+    const g = gridQuotient(nx, ny, false, false, false, false, meshType);
+    B.adj = g.adj; B.nx = nx; B.ny = ny; B.uv = g.uv;
+    const sp = 2.8 / (Math.max(nx, ny) - 1);
+    B._sp = sp;
+    const P = (u, v) => [(u - (nx - 1) / 2) * sp, ((ny - 1) / 2 - v) * sp, 0];
+    const N = () => [0, 0, 1];
+    B._P = P; B._N = N; B._wrapX = false; B._wrapY = false; B._flipX = false;
+    B.pos = g.uv.map(([x, y]) => P(x, y));
+    B.kind = "plane";
+    B.normalAt = () => [0, 0, 1];
+    B.edgeCurve = (a, b, S) => {
+      const pa = B.pos[a], pb = B.pos[b], out = [];
+      for (let s = 0; s <= S; s++) {
+        const t = s / S;
+        out.push([pa[0] + (pb[0] - pa[0]) * t,
+                  pa[1] + (pb[1] - pa[1]) * t, 0]);
+      }
+      return out;
+    };
+    const modal = modalDegree(B.adj);
+    B.adj.forEach((l, i) => { if (l.length < modal) B.defects.add(i); });
+    // faces: every unit cell, no seams to reduce across
+    const vid = (x, y) => y * nx + x;
+    const faces = [], patches = [], meshFaceUV = [];
+    for (let y = 0; y < ny - 1; y++)
+      for (let x = 0; x < nx - 1; x++) {
+        faces.push([vid(x, y), vid(x + 1, y), vid(x + 1, y + 1), vid(x, y + 1)]);
+        patches.push([x, y]);
+        meshFaceUV.push([[x, y], [x + 1, y], [x + 1, y + 1], [x, y + 1]]);
+      }
+    B.cells = { faces, patches, P };
+    B.meshFaces = faces;
+    B.meshFaceUV = meshFaceUV;
+    B.plate = [
+      { k: "plate.surface", t: "D\u00B2", edit: "surface" },
+      { k: "plate.mesh", t: nx + "\u00D7" + ny + " square", edit: "mesh" },
+      { k: "plate.V", t: "V " + B.adj.length, edit: "scale" },
+      { k: "plate.chi", t: "\u03C7 1" },
+      { k: "plate.boundary", t: "\u2202 1" },
+      { k: "plate.deg", t: "deg " + degText(B.adj) },
+    ];
+  }
+
+  else { // box (3D lattice)
+    const n = scale;
+    const g = boxLattice(n);
+    const sp = 2.3 / (n - 1);
+    B.adj = g.adj;
+    B.pos = g.xyz.map(([x, y, z]) => [
+      (x - (n - 1) / 2) * sp, (y - (n - 1) / 2) * sp, (z - (n - 1) / 2) * sp]);
+    B.kind = "box";
+    B.flatStones = true;
+    B.normalAt = () => [0, 0, 1];
+    B.edgeCurve = (a, b, S) => {
+      const pa = B.pos[a], pb = B.pos[b], out = [];
+      for (let s = 0; s <= S; s++) {
+        const t = s / S;
+        out.push([pa[0] + (pb[0] - pa[0]) * t, pa[1] + (pb[1] - pa[1]) * t,
+                  pa[2] + (pb[2] - pa[2]) * t]);
+      }
+      return out;
+    };
+    B.adj.forEach((l, i) => { if (l.length === 3) B.defects.add(i); });
+    B.plate = [
+      { k: "plate.surface", t: "I\u00B3 \u2282 E\u00B3", edit: "surface" },
+      { k: "plate.mesh", t: "cubic " + n + "\u00B3", edit: "mesh" },
+      { k: "plate.V", t: "V " + B.adj.length, edit: "scale" },
+      { k: "plate.deg", t: "deg " + degText(B.adj) },
+    ];
+  }
+
+  B.edges = edgeList(B.adj);
+  B.minEdge = minEdgeLen(B.pos, B.edges);
+  return B;
+}
+
+// ---------- incidence derivation ----------------------------------------------
+// Rebuild the board with a different cell type as the playable sites, via
+// GeoCells: edges (line graph), faces (dual), or all cells (Hasse diagram).
+// The derived object keeps the board contract — adj / pos / normalAt /
+// edgeCurve / defects / plate — so the engine, renderer, picker and share
+// codec are untouched. Geometry: on the sphere every site is projected
+// radially; on grid quotients sites carry cover coordinates so edges and
+// stones cross seams (including the Möbius flip) exactly like vertices do.
+
+function deriveBoard(B, mode) {
+  if (mode === "vertices" || !B.meshFaces) return B;
+  const cx = GeoCells.fromMesh({ nVerts: B.adj.length, faces: B.meshFaces });
+  const d = GeoCells.build(cx, mode);
+  const nV = cx.nV, nE = cx.edges.length;
+
+  if (B.kind === "sphere") {
+    const unit = (p) => {
+      const r = Math.hypot(p[0], p[1], p[2]);
+      return [p[0] / r, p[1] / r, p[2] / r];
+    };
+    const uVert = B.pos.map(unit);
+    const uEdge = cx.edges.map(([a, b]) => unit([
+      uVert[a][0] + uVert[b][0], uVert[a][1] + uVert[b][1],
+      uVert[a][2] + uVert[b][2]]));
+    const uFace = cx.faces.map(f => {
+      const c = [0, 0, 0];
+      for (const v of f) for (let q = 0; q < 3; q++) c[q] += uVert[v][q];
+      return unit(c);
+    });
+    const uSite = mode === "edges" ? uEdge : mode === "faces" ? uFace
+      : uVert.concat(uEdge, uFace);
+    B.pos = uSite.map(p => [p[0] * RS, p[1] * RS, p[2] * RS]);
+    B.normalAt = i => uSite[i];
+    B.edgeCurve = (a, b, S) => {
+      const out = [];
+      for (let s = 0; s <= S; s++) {
+        const p = slerp(uSite[a], uSite[b], s / S);
+        out.push([p[0] * RS, p[1] * RS, p[2] * RS]);
+      }
+      return out;
+    };
+  } else {                                     // torus / möbius: cover coords
+    const P = B._P, N = B._N;
+    const wrapX = B._wrapX, wrapY = B._wrapY, flipX = B._flipX;
+    const uvVert = B.uv;
+    const uvEdge = cx.edges.map(([a, b]) => {
+      const [x1, y1] = uvVert[a];
+      const [x2, y2] = coverRep(x1, y1, uvVert[b][0], uvVert[b][1],
+                                B.nx, B.ny, wrapX, wrapY, flipX);
+      return [(x1 + x2) / 2, (y1 + y2) / 2];
+    });
+    const uvFace = B.meshFaceUV.map(uvs => {
+      let x = 0, y = 0;
+      for (const [cx2, cy2] of uvs) { x += cx2; y += cy2; }
+      return [x / uvs.length, y / uvs.length];
+    });
+    const uvSite = mode === "edges" ? uvEdge : mode === "faces" ? uvFace
+      : uvVert.concat(uvEdge, uvFace);
+    B.pos = uvSite.map(([u, v]) => P(u, v));
+    B.uvSite = uvSite;
+    B.normalAt = i => N(uvSite[i][0], uvSite[i][1]);
+    B.edgeCurve = (a, b, S) => {
+      const [x1, y1] = uvSite[a];
+      const [x2, y2] = coverRep(x1, y1, uvSite[b][0], uvSite[b][1],
+                                B.nx, B.ny, wrapX, wrapY, flipX);
+      const out = [];
+      for (let s = 0; s <= S; s++) {
+        const t = s / S;
+        out.push(P(x1 + (x2 - x1) * t, y1 + (y2 - y1) * t));
+      }
+      return out;
+    };
+  }
+
+  B.adj = d.neighbors;
+  B.dim = d.dim;
+  B.siteMode = mode;
+  B.inc = { mode, meta: d.meta };
+  B.cells = null;                              // cell paint is a vertex-mode view
+  B.edges = edgeList(B.adj);
+  B.minEdge = minEdgeLen(B.pos, B.edges);
+
+  // brass defects: degree differing from the modal degree of its dimension class
+  B.defects = new Set();
+  const byDim = {};
+  B.adj.forEach((l, i) => {
+    const k = B.dim[i];
+    (byDim[k] = byDim[k] || {})[l.length] = (byDim[k][l.length] || 0) + 1;
+  });
+  const modalOf = {};
+  for (const k in byDim) {
+    let best = 0;
+    for (const deg in byDim[k])
+      if (byDim[k][deg] > best) { best = byDim[k][deg]; modalOf[k] = +deg; }
+  }
+  B.adj.forEach((l, i) => { if (l.length !== modalOf[B.dim[i]]) B.defects.add(i); });
+
+  // plate: site mode segment + updated counts
+  const vSeg = B.plate.find(s => s.k === "plate.V");
+  if (vSeg) vSeg.t = "sites " + B.adj.length;
+  const dSeg = B.plate.find(s => s.k === "plate.deg");
+  if (dSeg) dSeg.t = "deg " + degText(B.adj);
+  const mi = B.plate.findIndex(s => s.k === "plate.mesh");
+  B.plate.splice(mi + 1, 0,
+    { k: "plate.sites", t: "on " + mode, edit: "incidence" });
+  return B;
+}
+
+// ---------- THREE scene ------------------------------------------------------
+
+const el = document.getElementById("view");
+const renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true });
+renderer.setPixelRatio(Math.min(devicePixelRatio, 2));
+el.appendChild(renderer.domElement);
+const scene = new THREE.Scene();
+const camera = new THREE.PerspectiveCamera(38, 1, 0.1, 100);
+camera.position.set(0, 0, 5.4);
+scene.add(new THREE.AmbientLight(0xbfc8d4, 0.85));
+const key1 = new THREE.DirectionalLight(0xfff2dc, 0.85);
+key1.position.set(3, 4, 5);
+scene.add(key1);
+const key2 = new THREE.DirectionalLight(0x9db4d0, 0.35);
+key2.position.set(-4, -2, -4);
+scene.add(key2);
+const group = new THREE.Group();
+scene.add(group);
+
+// ---------- state ------------------------------------------------------------
+
+const state = {
+  surface: "sphere", mesh: "tri", scaleIdx: 1, paint: "ink",
+  incidence: "vertices",
+  opponent: "human", aiColor: WHITE,
+  ai: { engine: null, busy: false, seq: 0 },
+  B: null, eng: null, over: false,
+  showPA: false,
+  meshes: { surface: null, edges: null, dots: [], stones: [], ghost: null,
+            ring: null, cellMesh: null },
+};
+
+const INK = { line: 0x7e93a8, dot: 0xe8e2d4, brass: 0xc98a3d,
+              faceLo: 0x1a212b, faceHi: 0x22303d };
+
+// ---------- rendering --------------------------------------------------------
+
+function clearGroup() {
+  while (group.children.length) {
+    const c = group.children.pop();
+    if (c.geometry) c.geometry.dispose();
+    if (c.material) (Array.isArray(c.material) ? c.material : [c.material])
+      .forEach(m => m.dispose());
+    group.remove(c);
+  }
+  state.meshes = { surface: null, edges: null, dots: [], stones: [],
+                   ghost: null, ring: null, cellMesh: null };
+}
+
+function buildSurfaceMesh(B) {
+  if (B.kind === "sphere") {
+    const geo = new THREE.SphereGeometry(RS * 0.985, 48, 32);
+    const mat = new THREE.MeshLambertMaterial({ color: INK.faceLo,
+      polygonOffset: true, polygonOffsetFactor: 2, polygonOffsetUnits: 2 });
+    return new THREE.Mesh(geo, mat);
+  }
+  if (B.kind === "plane") {
+    const pad = B._sp * 0.9;
+    const geo = new THREE.PlaneGeometry((B.nx - 1) * B._sp + 2 * pad,
+                                        (B.ny - 1) * B._sp + 2 * pad);
+    const mat = new THREE.MeshLambertMaterial({ color: INK.faceLo,
+      side: THREE.DoubleSide,
+      polygonOffset: true, polygonOffsetFactor: 2, polygonOffsetUnits: 2 });
+    const m = new THREE.Mesh(geo, mat);
+    m.position.z = -0.012;
+    return m;
+  }
+  if (B.kind === "torus" || B.kind === "mobius") {
+    const nu = B.nx * 8, nv = 24;
+    const P = B.kind === "torus"
+      ? (u, v) => torusPoint(u / nu * B.nx, v / nv * (B.ny - (B.kind === "torus" ? 0 : 1)), B.nx, B.ny, TOR.R, TOR.r)
+      : (u, v) => mobiusPoint(u / nu * B.nx, v / nv * (B.ny - 1), B.nx, B.ny, MOB.R, MOB.w);
+    const verts = [], idx = [];
+    for (let v = 0; v <= nv; v++)
+      for (let u = 0; u <= nu; u++) verts.push(...P(u, v));
+    for (let v = 0; v < nv; v++)
+      for (let u = 0; u < nu; u++) {
+        const a = v * (nu + 1) + u, b = a + 1, c = a + nu + 1, d = c + 1;
+        idx.push(a, b, c, b, d, c);
+      }
+    const geo = new THREE.BufferGeometry();
+    geo.setAttribute("position", new THREE.Float32BufferAttribute(verts, 3));
+    geo.setIndex(idx);
+    geo.computeVertexNormals();
+    const mat = new THREE.MeshLambertMaterial({ color: INK.faceLo,
+      side: THREE.DoubleSide,
+      polygonOffset: true, polygonOffsetFactor: 2, polygonOffsetUnits: 2 });
+    return new THREE.Mesh(geo, mat);
+  }
+  return null;  // box: no surface
+}
+
+const EDGE_SEGS = 6;
+function buildEdges(B) {
+  const positions = [], colors = [];
+  const c0 = new THREE.Color(INK.line);
+  for (const [a, b] of B.edges) {
+    const pts = B.edgeCurve(a, b, EDGE_SEGS);
+    for (let s = 0; s < pts.length - 1; s++) {
+      positions.push(...pts[s], ...pts[s + 1]);
+      colors.push(c0.r, c0.g, c0.b, c0.r, c0.g, c0.b);
+    }
+  }
+  const geo = new THREE.BufferGeometry();
+  geo.setAttribute("position", new THREE.Float32BufferAttribute(positions, 3));
+  geo.setAttribute("color", new THREE.Float32BufferAttribute(colors, 3));
+  const mat = new THREE.LineBasicMaterial({ vertexColors: true,
+    transparent: true, opacity: 0.9 });
+  return new THREE.LineSegments(geo, mat);
+}
+
+function paintEdges(B) {
+  const attr = state.meshes.edges.geometry.getAttribute("color");
+  const per = EDGE_SEGS * 2;                     // color entries per edge
+  let colors;
+  if (state.paint === "edge") {
+    const ec = greedyEdgeColoring(B.adj);
+    colors = ec.colors.map(c => new THREE.Color(PALETTE[c % PALETTE.length]));
+  } else {
+    colors = B.edges.map(() => new THREE.Color(INK.line));
+  }
+  for (let e = 0; e < B.edges.length; e++) {
+    const c = colors[e];
+    for (let s = 0; s < per; s++) {
+      attr.setXYZ(e * per + s, c.r, c.g, c.b);
+    }
+  }
+  attr.needsUpdate = true;
+}
+
+function buildDots(B) {
+  const r = Math.max(0.012, B.minEdge * 0.085);
+  const geo = new THREE.SphereGeometry(r, 8, 6);
+  const brassGeo = new THREE.SphereGeometry(r * 1.7, 10, 8);
+  B.pos.forEach((p, i) => {
+    const brass = B.defects.has(i);
+    const mat = new THREE.MeshBasicMaterial({
+      color: brass ? INK.brass : INK.dot,
+      transparent: true, opacity: brass ? 0.95 : 0.55 });
+    const m = new THREE.Mesh(brass ? brassGeo : geo, mat);
+    m.position.set(p[0], p[1], p[2]);
+    group.add(m);
+    state.meshes.dots.push(m);
+  });
+}
+
+function paintDots(B) {
+  let vc = null;
+  if (state.paint === "vertex") vc = greedyVertexColoring(B.adj);
+  state.meshes.dots.forEach((m, i) => {
+    if (vc) {
+      m.material.color.set(PALETTE[vc[i] % PALETTE.length]);
+      m.material.opacity = 0.95;
+    } else {
+      const brass = B.defects.has(i);
+      m.material.color.set(brass ? INK.brass : INK.dot);
+      m.material.opacity = brass ? 0.95 : 0.55;
+    }
+  });
+}
+
+function buildCellMesh(B) {
+  if (!B.cells) return null;
+  const positions = [], colors = [];
+  const push = (pts, col) => {          // fan-triangulate a convex cell
+    for (let i = 1; i + 1 < pts.length; i++) {
+      positions.push(...pts[0], ...pts[i], ...pts[i + 1]);
+      for (let k = 0; k < 3; k++) colors.push(col.r, col.g, col.b);
+    }
+  };
+  const fc = greedyFaceColoring(B.cells.faces);
+  const lift = 1.012;
+  if (B.kind === "sphere") {
+    B.cells.faces.forEach((f, fid) => {
+      const col = new THREE.Color(PALETTE[fc[fid] % PALETTE.length]);
+      push(f.map(v => B.pos[v].map(q => q * lift)), col);
+    });
+  } else {                              // curved grid cells via cover coords
+    const SUB = 4;
+    B.cells.patches.forEach(([x, y], fid) => {
+      const col = new THREE.Color(PALETTE[fc[fid] % PALETTE.length]);
+      for (let i = 0; i < SUB; i++)
+        for (let j = 0; j < SUB; j++) {
+          const q = (a, b) => {
+            const p = B.cells.P(x + a / SUB, y + b / SUB);
+            const n = B._N(x + a / SUB, y + b / SUB);
+            return [p[0] + n[0] * 0.012, p[1] + n[1] * 0.012,
+                    p[2] + n[2] * 0.012];
+          };
+          push([q(i, j), q(i + 1, j), q(i + 1, j + 1), q(i, j + 1)], col);
+        }
+    });
+  }
+  const geo = new THREE.BufferGeometry();
+  geo.setAttribute("position", new THREE.Float32BufferAttribute(positions, 3));
+  geo.setAttribute("color", new THREE.Float32BufferAttribute(colors, 3));
+  const mat = new THREE.MeshBasicMaterial({ vertexColors: true,
+    transparent: true, opacity: 0.42, side: THREE.DoubleSide,
+    depthWrite: false });
+  return new THREE.Mesh(geo, mat);
+}
+
+function stoneGeometryFor(B) {
+  const r = Math.min(0.46 * B.minEdge, 0.34);
+  return { r, geo: new THREE.SphereGeometry(r, 20, 14) };
+}
+
+function stonePosition(B, i, r) {
+  const p = B.pos[i];
+  if (B.flatStones) return p;
+  const n = B.normalAt(i), lift = 0.55 * r * 0.62;
+  return [p[0] + n[0] * lift, p[1] + n[1] * lift, p[2] + n[2] * lift];
+}
+
+function orientStone(B, mesh, i) {
+  if (B.flatStones) return;
+  const n = B.normalAt(i);
+  const q = new THREE.Quaternion().setFromUnitVectors(
+    new THREE.Vector3(0, 1, 0), new THREE.Vector3(n[0], n[1], n[2]));
+  mesh.quaternion.copy(q);
+}
+
+// ---------- game sync --------------------------------------------------------
+
+let stoneGeo = null, stoneR = 0.1;
+
+function newBoard(pushHash) {
+  clearGroup();
+  const B = deriveBoard(buildBoard(state.surface, state.mesh, state.scaleIdx),
+                        state.incidence);
+  state.B = B;
+  state.eng = Engine(B.adj, { komi: 7.5 });
+  state.over = false;
+  const surf = buildSurfaceMesh(B);
+  if (surf) { group.add(surf); state.meshes.surface = surf; }
+  state.meshes.edges = buildEdges(B);
+  group.add(state.meshes.edges);
+  buildDots(B);
+  const sg = stoneGeometryFor(B);
+  stoneGeo = sg.geo; stoneR = sg.r;
+  const gm = new THREE.MeshLambertMaterial({ color: 0xdddddd,
+    transparent: true, opacity: 0.45 });
+  state.meshes.ghost = new THREE.Mesh(stoneGeo, gm);
+  state.meshes.ghost.visible = false;
+  if (!state.B.flatStones) state.meshes.ghost.scale.set(1, 0.62, 1);
+  group.add(state.meshes.ghost);
+  const ringGeo = new THREE.TorusGeometry(stoneR * 0.55, stoneR * 0.09, 8, 24);
+  state.meshes.ring = new THREE.Mesh(ringGeo,
+    new THREE.MeshBasicMaterial({ color: INK.brass }));
+  state.meshes.ring.visible = false;
+  group.add(state.meshes.ring);
+  state.meshes.cellMesh = buildCellMesh(B);
+  if (state.meshes.cellMesh) {
+    state.meshes.cellMesh.visible = state.paint === "cells";
+    group.add(state.meshes.cellMesh);
+  }
+  paintDots(B); paintEdges(B);
+  renderPlate();
+  sync();
+  aiRebuild();
+  if (pushHash !== false) syncHash();
+  scheduleAI();
+}
+
+function sync() {
+  const B = state.B, eng = state.eng;
+  for (const s of state.meshes.stones) {
+    group.remove(s); s.material.dispose();
+  }
+  state.meshes.stones = [];
+  const pa = state.showPA
+    ? new Set([...eng.passAlive(BLACK), ...eng.passAlive(WHITE)])
+    : new Set();
+  const owner = state.over ? eng.score().owner : null;
+  eng.colors.forEach((c, i) => {
+    if (c === EMPTY) {
+      if (owner && owner[i]) {
+        const d = state.meshes.dots[i];
+        d.material.color.set(owner[i] === BLACK ? 0x2c343f : 0xf2ecdd);
+        d.material.opacity = 1.0;
+        d.scale.setScalar(1.8);
+      }
+      return;
+    }
+    const mat = new THREE.MeshLambertMaterial({
+      color: c === BLACK ? 0x1b2129 : 0xf0ead9 });
+    if (pa.has(i)) { mat.emissive = new THREE.Color(0x1d5a4e); }
+    const m = new THREE.Mesh(stoneGeo, mat);
+    if (!B.flatStones) { m.scale.set(1, 0.62, 1); orientStone(B, m, i); }
+    else m.scale.setScalar(0.9);
+    const p = stonePosition(B, i, stoneR);
+    m.position.set(p[0], p[1], p[2]);
+    group.add(m);
+    state.meshes.stones.push(m);
+  });
+  // last-move ring
+  if (eng.lastMove !== null && eng.lastMove !== undefined) {
+    const i = eng.lastMove;
+    const p = stonePosition(B, i, stoneR);
+    const n = B.flatStones ? [0, 0, 1] : B.normalAt(i);
+    state.meshes.ring.position.set(p[0] + n[0] * stoneR * 0.45,
+      p[1] + n[1] * stoneR * 0.45, p[2] + n[2] * stoneR * 0.45);
+    state.meshes.ring.quaternion.setFromUnitVectors(
+      new THREE.Vector3(0, 0, 1), new THREE.Vector3(n[0], n[1], n[2]));
+    state.meshes.ring.visible = true;
+  } else state.meshes.ring.visible = false;
+  renderStatus();
+}
+
+// ---------- status, plate, messages ------------------------------------------
+
+function span(k, t, cls) {
+  return '<span class="info' + (cls ? " " + cls : "") +
+         '" data-info="' + k + '">' + t + "</span>";
+}
+
+function renderStatus() {
+  const eng = state.eng;
+  const stat = document.getElementById("status");
+  if (state.over) {
+    const s = eng.score();
+    stat.innerHTML =
+      span("stat.score", "game over \u2014 " + s.winner +
+        (s.winner === "Draw" ? "" : " by " + Math.abs(s.margin).toFixed(1))) +
+      " \u00B7 " + span("stat.score", "B " + s.black + " : W " + s.white) +
+      " \u00B7 " + span("stat.komi", "komi 7.5");
+    return;
+  }
+  stat.innerHTML =
+    span("stat.turn", (eng.toMove === BLACK ? "Black" : "White") + " to play" +
+      (aiActive() && eng.toMove === state.aiColor ? " (AI)" : "")) +
+    " \u00B7 " + span("stat.captures",
+      "captures B " + eng.captures[BLACK] + " / W " + eng.captures[WHITE]) +
+    " \u00B7 " + span("stat.moves", "move " + eng.moves.length) +
+    " \u00B7 " + span("stat.komi", "komi 7.5");
+}
+
+function renderPlate() {
+  const canEdit = state.eng.moves.length === 0;
+  document.getElementById("plate").innerHTML = state.B.plate.map(seg =>
+    span(seg.k, seg.t, seg.edit && canEdit ? "editable" : "")).join(" \u00B7 ");
+}
+
+let msgTimer = null;
+function message(t, ms) {
+  const m = document.getElementById("msg");
+  m.textContent = t;
+  if (msgTimer) clearTimeout(msgTimer);
+  if (ms !== 0) msgTimer = setTimeout(() => { m.textContent = ""; }, ms || 3200);
+}
+
+// ---------- play actions -----------------------------------------------------
+
+const ERRTXT = {
+  occupied: "that point is occupied",
+  suicide: "suicide \u2014 the placed chain would have no liberties",
+  superko: "positional superko \u2014 this would repeat an earlier whole-board position",
+};
+
+function tryPlay(v, byAI) {
+  if (state.over) { message("the game is over \u2014 New board to start again"); return; }
+  if (!byAI && aiActive() &&
+      (state.ai.busy || state.eng.toMove === state.aiColor)) {
+    message("the AI is to move"); return;
+  }
+  const r = state.eng.play(v);
+  if (r.err) { message(ERRTXT[r.err] || r.err); return; }
+  if (r.captured.length)
+    message((state.eng.toMove === WHITE ? "Black" : "White") +
+      " captures " + r.captured.length);
+  sync(); renderPlate(); syncHash();
+  scheduleAI();
+}
+
+function doPass(byAI) {
+  if (state.over) return;
+  if (!byAI && aiActive() &&
+      (state.ai.busy || state.eng.toMove === state.aiColor)) {
+    message("the AI is to move"); return;
+  }
+  const r = state.eng.pass();
+  if (r.over) {
+    state.over = true;
+    message("two passes \u2014 territory scored (Tromp\u2013Taylor)", 0);
+  } else message((state.eng.toMove === BLACK ? "Black" : "White") + " to play after pass");
+  sync(); syncHash();
+  scheduleAI();
+}
+
+function doUndo() {
+  cancelAI();
+  if (state.eng.undo()) {
+    if (aiActive() && state.eng.toMove === state.aiColor) state.eng.undo();
+    state.over = false;
+    // reset any territory-tinted dots
+    paintDots(state.B);
+    sync(); renderPlate(); syncHash();
+  } else message("nothing to undo");
+}
+
+// ---------- share / correspondence -------------------------------------------
+
+function currentCode() {
+  return encodeShare(
+    [state.surface, state.mesh, state.scaleIdx, state.incidence],
+    state.eng.moves.map(mv => (mv[1] === null ? -1 : mv[1])));
+}
+
+function syncHash() {
+  try { history.replaceState(null, "", "#g=" + currentCode()); }
+  catch (e) { /* sandboxed frame: hash unavailable, share modal still works */ }
+}
+
+function loadShare(text) {
+  let st;
+  try { st = decodeShare(text); }
+  catch (e) { message("could not read that code: " + e.message); return false; }
+  const [surf, mesh, idx] = st.s;
+  const inc = st.s.length > 3 ? st.s[3] : "vertices";
+  if (!SURFACES[surf] || !SURFACES[surf].meshes[mesh] ||
+      !SURFACES[surf].meshes[mesh].scales[idx]) {
+    message("code names an unknown board spec"); return false;
+  }
+  if (!INC_MODES.includes(inc) ||
+      (inc !== "vertices" && !INC_OK[surf + ":" + mesh])) {
+    message("code names an unknown site structure"); return false;
+  }
+  state.surface = surf; state.mesh = mesh; state.scaleIdx = idx;
+  state.incidence = inc;
+  refreshSelectors(); refreshPaintOptions();
+  newBoard(false);
+  for (const m of st.m) {
+    const r = (m < 0) ? state.eng.pass() : state.eng.play(m);
+    if (r.err) {
+      message("code contains an illegal move (" + r.err + ") \u2014 fresh board");
+      newBoard(); return false;
+    }
+    if (r.over) state.over = true;
+  }
+  sync(); renderPlate(); syncHash();
+  message("loaded shared game \u2014 " + state.eng.moves.length + " moves, " +
+    (state.eng.toMove === BLACK ? "Black" : "White") + " to play", 5200);
+  scheduleAI();
+  return true;
+}
+
+function openShare() {
+  const code = currentCode();
+  let url = "";
+  try {
+    url = location.href.split("#")[0] + "#g=" + code;
+  } catch (e) { url = ""; }
+  const ta = document.getElementById("shareCode");
+  ta.value = (url && url.startsWith("http")) ? url : code;
+  document.getElementById("shareModal").classList.add("open");
+  ta.focus(); ta.select();
+}
+
+function copyShare() {
+  const ta = document.getElementById("shareCode");
+  ta.select();
+  const done = () => message("copied \u2014 send it; they load it, move, and send back", 4200);
+  if (navigator.clipboard && navigator.clipboard.writeText) {
+    navigator.clipboard.writeText(ta.value).then(done, () => {
+      document.execCommand("copy"); done();
+    });
+  } else { document.execCommand("copy"); done(); }
+}
+
+// ---------- AI opponent --------------------------------------------------------
+// The engine (GeoAI) sees only the adjacency graph, the stone array and a
+// legal-move mask computed here by the host rules — legality (ko, superko,
+// suicide) never leaves the Engine above.
+
+function aiActive() { return state.opponent !== "human"; }
+
+function cancelAI() {
+  state.ai.seq++;
+  if (state.ai.busy) { state.ai.busy = false; message(""); }
+}
+
+function aiRebuild() {
+  cancelAI();
+  if (!aiActive()) { state.ai.engine = null; return; }
+  const parts = state.opponent.split(":");          // "ai:<model>:<level>"
+  const m = GeoAI.models.find(x => x.id === parts[1]);
+  state.ai.engine = m ? m.create(state.B.adj, { level: parts[2] || "standard" })
+                      : null;
+}
+
+function scheduleAI() {
+  if (!aiActive() || state.over || state.ai.busy) return;
+  if (!state.ai.engine) aiRebuild();
+  if (!state.ai.engine) return;
+  if (state.eng.toMove !== state.aiColor) return;
+  state.ai.busy = true;
+  message("AI is thinking\u2026", 0);
+  setTimeout(aiMove, 60);                            // let the last stone paint
+}
+
+// pickMove may return a result synchronously (local engines) or a Promise
+// (bridge engines). A cancellation sequence number discards stale replies
+// after undo, new board, or an opponent switch; an illegal or malformed
+// reply from a misbehaving engine degrades to a pass, never to a bad board.
+function aiMove() {
+  if (!aiActive() || state.over || state.eng.toMove !== state.aiColor) {
+    state.ai.busy = false; message(""); return;
+  }
+  const eng = state.eng, n = state.B.adj.length;
+  const mask = new Uint8Array(n);
+  for (let v = 0; v < n; v++)
+    if (eng.colors[v] === EMPTY && !eng.trySim(v, state.aiColor).err) mask[v] = 1;
+  const seq = state.ai.seq;
+  const apply = (r) => {
+    if (seq !== state.ai.seq) return;               // canceled meanwhile
+    state.ai.busy = false;
+    message("");
+    if (state.over || state.eng.toMove !== state.aiColor) return;
+    if (!r || typeof r.move !== "number" ||
+        (r.move >= 0 && !mask[r.move])) {
+      doPass(true);
+      if (!state.over) message("AI passes (no usable move returned)");
+      return;
+    }
+    if (r.move < 0) {
+      doPass(true);
+      if (!state.over)
+        message("AI passes" + (r.reason ? " (" + r.reason + ")" : ""));
+    } else tryPlay(r.move, true);
+  };
+  const fail = (e) => {
+    if (seq !== state.ai.seq) return;
+    state.ai.busy = false;
+    message("AI unavailable (" + ((e && e.message) || e) + ") \u2014 your move",
+            6000);
+  };
+  let r;
+  try { r = state.ai.engine.pickMove(eng.colors, state.aiColor,
+                                     { legalMask: mask }); }
+  catch (e) { fail(e); return; }
+  if (r && typeof r.then === "function") r.then(apply, fail);
+  else apply(r);
+}
+
+// ---------- explanations (hover \u24D8, right-click / long-press) ----------------
+
+function fmtHist(adj) {
+  const h = degreeHist(adj);
+  return Object.keys(h).map(Number).sort((a, b) => a - b)
+    .map(k => "deg " + k + " \u00D7 " + h[k]).join(", ");
+}
+
+const EXPLAIN = {
+  "plate.surface": () => {
+    const s = state.surface;
+    if (s === "sphere") return { t: "S\u00B2 \u2014 the 2-sphere",
+      b: "A closed, orientable surface: Euler characteristic \u03C7 = 2, no boundary (\u2202 = 0). Every direction wraps around, so there is no first line to crawl on and no corner in which to live cheaply \u2014 all territory must be enclosed in the open. Click this readout before the first move to cycle surfaces." };
+    if (s === "torus") return { t: "T\u00B2 \u2014 the torus",
+      b: "The quotient of a rectangle with opposite sides glued, no flips. Closed, orientable, genus 1, \u03C7 = 0, \u2202 = 0. The board is vertex-transitive: every point is equivalent, so there are no corners, no edges, no hoshi \u2014 opening theory must start from pure symmetry. Chains and ladders wrap around both ways." };
+    if (s === "mobius") return { t: "M\u00B2 \u2014 the M\u00F6bius band",
+      b: "Glue the left and right edges of a rectangle with a flip: the result is one-sided and non-orientable, \u03C7 = 0, with exactly one boundary circle (\u2202 = 1) of twice the apparent length. A chain crossing the seam comes back mirrored \u2014 what looks like two rims is a single connected edge. The brass rim dots mark the boundary points (fewer liberties)." };
+    if (s === "plane") return { t: "D\u00B2 \u2014 the disk (the classical board)",
+      b: "A square region of the plane, no gluing: \u03C7 = 1, one boundary circle (\u2202 = 1). This is the board Go was born on, and its topology is the tamest here \u2014 contractible, so all the strategic texture comes from the boundary: corners are cheapest to enclose (two sides come free), then edges, then the open center. Play it against any closed surface above to feel how much of classical opening theory is really a theory of \u2202." };
+    return { t: "I\u00B3 \u2282 E\u00B3 \u2014 a 3-dimensional box",
+      b: "Go on a solid cubic lattice. Interior points have six neighbors \u2014 capturing a lone stone in open space takes six moves \u2014 while the 8 corners (brass) have only three liberties. Nothing in the rules changes: the engine only ever sees the adjacency graph, whatever its dimension." };
+  },
+  "plate.mesh": () => {
+    const s = state.surface, m = state.mesh;
+    if (s === "sphere" && m === "tri") return { t: "{3,5+}(f,0) \u2014 geodesic polyhedron",
+      b: "Class-I icosahedral geodesic: each triangle of an icosahedron is subdivided at frequency f and projected to the sphere. Almost every vertex has degree 6, but Euler's formula forces exactly 12 vertices of degree 5 \u2014 the brass points. Discrete Gauss\u2013Bonnet: \u03A3(6 \u2212 deg v) = 6\u03C7 = 12. Click to cycle mesh types." };
+    if (s === "sphere" && m === "square") return { t: "cube-sphere \u2014 quadrangulated S\u00B2",
+      b: "Each face of a cube is subdivided \u03BD\u00D7\u03BD and projected outward. Almost everywhere the board is degree 4, like a classical goban \u2014 but the 8 cube corners (brass) have degree 3. The quad version of Gauss\u2013Bonnet: \u03A3(4 \u2212 deg v) = 4\u03C7 = 8, all concentrated at those corners." };
+    if (s === "sphere" && m === "hex") return { t: "GP(f,0) \u2014 Goldberg polyhedron",
+      b: "The dual of the geodesic triangulation: every vertex has degree 3, and the curvature moves into the faces \u2014 exactly 12 pentagons among the hexagons, the football / C\u2086\u2080 fullerene pattern. Three liberties per point makes every stone fragile: the whole board plays like the first line." };
+    if (m === "tri") return { t: "triangular lattice \u2014 degree 6",
+      b: "The square grid plus one diagonal per cell: every interior vertex has degree 6. Because \u03C7 = 0 here, no defects are forced \u2014 on the torus the lattice is perfectly 6-regular. Six liberties per point makes chains thick and hard to kill." + (s === "mobius" ? " Across the M\u00F6bius seam the diagonal's handedness reverses \u2014 the lattice is chiral, the surface is not \u2014 but the adjacency graph remains perfectly well-defined, which is all the rules need." : "") };
+    if (m === "hex") return { t: "honeycomb lattice \u2014 degree 3",
+      b: "A hexagonal tiling (built as a brick wall: vertical bonds on alternating columns). Every interior vertex has degree 3, so every stone starts with three liberties \u2014 sharp, fragile, first-line Go everywhere. Wrapping a honeycomb imposes parity conditions: even side lengths across plain seams, and odd height across the M\u00F6bius flip \u2014 the Klein bottle refuses it outright." };
+    if (s === "box") return { t: "cubic lattice",
+      b: "\u2124\u00B3 restricted to an n\u00D7n\u00D7n box: the three-dimensional analogue of the square grid. Degree 6 in the interior, 5 on faces, 4 on edges, 3 at corners." };
+    if (s === "plane") return { t: "square grid \u2014 the classical goban",
+      b: "A patch of \u2124\u00B2 with no gluing at all: 4 liberties inside, 3 on the sides, 2 at the corners \u2014 the liberty gradient that makes corners the cheapest territory and drives all classical opening theory. 9\u00D79, 13\u00D713 and 19\u00D719 are the traditional teaching, club and tournament sizes; the brass rim marks the boundary points. Every other board in this app is an answer to the question: what happens to Go when this edge is glued away, twisted, or curved?" };
+    return { t: "square grid \u2014 degree 4",
+      b: "The classical goban lattice, glued according to the chosen surface. Four liberties per interior point." };
+  },
+  "plate.V": () => ({ t: "V \u2014 vertices (playable points)",
+    b: "This board has V = " + state.B.adj.length + " points and E = " +
+       state.B.edges.length + " connections. The Scale selector changes the mesh resolution \u2014 or click this readout before the first move to cycle it. Area scoring is a census of exactly these V points: stone, territory, or neutral." }),
+  "plate.chi": () => {
+    const B = state.B;
+    const M = B.inc ? B.inc.meta : null;
+    let b;
+    if (B.kind === "sphere") {
+      const V = M ? M.nV : B.adj.length;
+      const E = M ? M.nE : B.edges.length;
+      const F = M ? M.nF : (B.faces ? B.faces.length : (B.adj.length / 2 + 2));
+      b = "\u03C7 = V \u2212 E + F = " + V + " \u2212 " + E +
+          " + " + F + " = 2. The Euler characteristic is a topological invariant \u2014 refine the mesh however you like, it never changes. \u03C7 = 2 is what forces the defects: a perfectly regular degree-6 (or 4, or 3) mesh can only exist at \u03C7 = 0." +
+          (M ? " The formula is evaluated on the underlying mesh; the sites you are playing on are its " + B.siteMode + ", a derived graph drawn on the same surface \u2014 so \u03C7 is untouched." : "");
+    } else if (B.kind === "plane") {
+      const V = M ? M.nV : B.adj.length;
+      const E = M ? M.nE : B.edges.length;
+      const F = M ? M.nF : B.meshFaces.length;
+      b = "\u03C7 = V \u2212 E + F = " + V + " \u2212 " + E + " + " + F +
+          " = 1. The disk is contractible \u2014 topologically trivial \u2014 so unlike the sphere it forces no curvature defects, and unlike the flat quotients it isn't closed. What it has instead is a boundary, and on this board the boundary is the whole story: every strategic asymmetry of classical Go (corner, side, center) is a distance-to-\u2202 effect, not a \u03C7 effect.";
+    } else {
+      b = "\u03C7 = 0: the torus, M\u00F6bius band and Klein bottle are the flat surfaces." +
+          (M ? " Check it on this very mesh: V \u2212 E + F = " + M.nV + " \u2212 " + M.nE + " + " + M.nF + " = " + (M.nV - M.nE + M.nF) + "." : "") +
+          " Zero Euler characteristic is exactly the condition under which perfectly regular lattices close up with no defects \u2014 which is why this board has no forced brass points (only the boundary, if any).";
+    }
+    return { t: "\u03C7 \u2014 Euler characteristic", b };
+  },
+  "plate.boundary": () => ({ t: "\u2202 \u2014 boundary circles",
+    b: "The number of boundary circles of the surface. A classical 19\u00D719 board is a disk (\u2202 = 1) and its edge dominates strategy: corners first, then sides, then center. Closed surfaces (\u2202 = 0) abolish the edge entirely. The M\u00F6bius band keeps exactly one boundary circle \u2014 a single circle of double length that visits what looks like both rims." }),
+  "plate.deg": () => ({ t: "degree \u2014 liberties per point",
+    b: "Vertex degree = liberties of a lone stone there = the local branching factor. This board: " + fmtHist(state.B.adj) + ". Degree is the strongest strategy knob after topology: deg-3 boards are razor-sharp (eyes are cheap, chains die fast), deg-4 is classical, deg-6 favors thick unkillable shapes." }),
+  "plate.sites": () => {
+    const m = state.B.siteMode, M = state.B.inc.meta;
+    const t = { edges: "sites: the mesh's edges",
+                faces: "sites: the mesh's faces",
+                cells: "sites: all cells" }[m];
+    const b = m === "edges"
+      ? "Stones sit on the " + M.nE + " edges of the mesh; two sites are adjacent when the edges share a vertex. This is the <b>line graph</b> L(G) \u2014 the same move that turns the arcs of a topological graph into classifiable nodes. Liberties now count incident edges, so the feel of the game shifts even though the rules are word-for-word identical."
+      : m === "faces"
+      ? "Stones sit on the " + M.nF + " faces; two sites are adjacent when the faces share an edge. This is the <b>dual graph</b> \u2014 exactly the construction that turns the geodesic triangulation into the Goldberg board, now available on every surface here. Triangulated meshes give a deg-3 dual (sharp, fragile Go); quad meshes give deg-4."
+      : "Stones sit on every cell \u2014 " + M.nV + " vertices, " + M.nE + " edges and " + M.nF + " faces at once \u2014 adjacent by <b>incidence</b>: a vertex touches the edges it ends, an edge touches the faces it bounds. This is the Hasse diagram of the face poset: a cross-dimensional board where a chain can climb from a corner through an edge into a face. Degrees differ by dimension, so brass marks the irregulars within each class.";
+    return { t, b };
+  },
+  "sel.incidence": () => ({ t: "stones on \u2014 incidence structures",
+    b: "Which cells of the mesh are the playable sites. <b>Vertices</b>: the 1-skeleton \u2014 canonical Go. <b>Edges</b>: sites are mesh edges, adjacent when they share an endpoint \u2014 the line graph L(G). <b>Faces</b>: sites are faces, adjacent across shared edges \u2014 the dual graph (the geodesic sphere's dual is the Goldberg board, so this generalizes that construction to every surface). <b>All cells</b>: vertices, edges and faces together, adjacent by incidence \u2014 the Hasse diagram of the face poset, cross-dimensional Go. The rules never change: liberties, capture, superko and scoring only ever read the adjacency graph, whichever graph that is." }),
+  "sel.opponent": () => ({ t: "opponent \u2014 hierarchical GNN",
+    b: "Play against a fixed-weight hierarchical graph neural network. It reads the position as fields on the board graph: exact tactical features (liberties, capture, atari, eyes), message passing over 1- and 2-ring neighborhoods, and a <b>multi-persistence hierarchy</b> \u2014 the ascending/descending basins of its influence function, cancelled by topological persistence into nested coarser partitions, with messages combined jointly across all levels (after Leventhal, Gyulassy, Pascucci &amp; Heimann, NeurIPS 2022). A 1-ply lookahead guides the final choice; strength sets exploration noise, candidate width and lookahead. Because it only ever sees the adjacency graph, the same network plays every surface, mesh and incidence structure above." }),
+  "sel.aicolor": () => ({ t: "AI color",
+    b: "Which side the network plays. Give it Black and it opens; give it White and you do. Change it any time \u2014 the AI simply takes over that color's next turn." }),
+  "stat.turn": () => ({ t: "to play",
+    b: "Black and White alternate, Black first; a turn is a stone on an empty point, or a pass. After a placement, opponent chains left with no liberties are removed first, then the rule checks your own chain (self-capture is forbidden here). Finally, positional superko: a move may never recreate any earlier whole-board position \u2014 checked by hashing every position ever seen, which on wrap-around boards matters far more often than on the classical grid." }),
+  "stat.captures": () => ({ t: "capturing",
+    b: "A chain is a maximal group of same-colored stones connected along board edges. Its liberties are the empty points adjacent to it \u2014 adjacency in the board graph, so a liberty can sit across a seam or around the back of the sphere. Fill a chain's last liberty and the whole chain is removed. This counter totals stones captured by each player; captures matter for the position, not the score (area scoring)." }),
+  "stat.moves": () => ({ t: "move counter",
+    b: "Total moves played, including passes. Two consecutive passes end the game and trigger scoring. The full move list is what the Share code carries." }),
+  "stat.komi": () => ({ t: "komi 7.5",
+    b: "Compensation added to White's score for moving second. The half point guarantees no draws." }),
+  "stat.score": () => ({ t: "Tromp\u2013Taylor area scoring",
+    b: "Score = your stones on the board + empty regions whose border touches only your color (+ komi for White). Empty regions touching both colors count for no one. Enlarged dots show territory ownership. This definition needs nothing but the graph \u2014 no notion of 'inside' \u2014 which is why it survives every topology unchanged." }),
+  "opt.passalive": () => ({ t: "pass-alive (Benson 1976)",
+    b: "Stones glow jade when they are unconditionally alive: the opponent cannot capture them even if the owner passes forever. Computed as a greatest fixpoint \u2014 repeatedly discard chains with fewer than two vital enclosed regions, and regions bordered by discarded chains, until stable. Benson's theorem is stated purely in graph terms, so it holds verbatim on spheres, tori, M\u00F6bius bands and 3D lattices." }),
+  "opt.paint": () => ({ t: "paint \u2014 incidence colorings",
+    b: "Color the board's incidence structure. <b>Vertices</b>: a proper graph coloring \u2014 adjacent points always differ; the number of colors needed is the chromatic number (a plain grid needs 2; add diagonals or odd wraps and it grows). <b>Edges</b>: a proper edge coloring \u2014 edges meeting at a vertex differ (Vizing: \u0394 or \u0394+1 colors suffice). <b>Cells</b>: faces colored so faces sharing an edge differ \u2014 watch the seams on quotient boards, where a checkerboard can fail to close up. The brass dots are the mesh's curvature defects." }),
+  "act.pass": () => ({ t: "pass",
+    b: "Decline to place a stone. Two consecutive passes end the game and the position is scored as it stands (Tromp\u2013Taylor: dead stones are not removed by agreement \u2014 capture them before passing)." }),
+  "act.undo": () => ({ t: "undo",
+    b: "Rewinds one move (including the superko history, so a retracted position becomes playable again)." }),
+  "act.new": () => ({ t: "new board",
+    b: "Rebuilds the board from the current Surface \u00D7 Mesh \u00D7 Scale spec and starts a fresh game." }),
+  "act.share": () => ({ t: "share \u2014 correspondence play",
+    b: "Produces a code (and URL) encoding this exact game: the board spec plus every move. Send it to your opponent; they load it, play a move, and send the new code back \u2014 remote Go on any topology, no server involved. Codes are validated on load by replaying every move through the rules engine, so a corrupted code fails loudly instead of silently." }),
+  "sel.surface": () => ({ t: "surface",
+    b: "The underlying manifold \u2014 which points exist and how the world wraps. Right-click the plate segments above the board for the mathematics of the current choice." }),
+  "sel.mesh": () => ({ t: "mesh",
+    b: "The tiling whose vertices are the playable points: triangular (degree 6), square (degree 4), or hexagonal (degree 3). On the sphere these become the geodesic polyhedron, the cube-sphere, and the Goldberg polyhedron \u2014 each with the defects Euler's formula demands. Some combinations are impossible (honeycombs refuse certain gluings); those options are disabled." }),
+  "sel.scale": () => ({ t: "scale",
+    b: "Mesh resolution \u2014 the abstract size knob. Each step raises the subdivision frequency or grid size; the option labels show the resulting vertex count." }),
+};
+
+// tooltip + panel machinery
+const tip = document.getElementById("tip");
+let tipFor = null;
+document.addEventListener("pointerover", e => {
+  const t = e.target.closest("[data-info]");
+  if (!t) { tip.classList.remove("show"); tipFor = null; return; }
+  tipFor = t;
+  const ex = EXPLAIN[t.dataset.info];
+  tip.textContent = "\u24D8 " + (ex ? ex().t : "") + " \u2014 right-click to explain";
+  tip.classList.add("show");
+});
+document.addEventListener("pointermove", e => {
+  if (!tipFor) return;
+  tip.style.left = Math.min(e.clientX + 14, innerWidth - 240) + "px";
+  tip.style.top = (e.clientY + 18) + "px";
+});
+document.addEventListener("pointerout", e => {
+  if (e.target.closest && e.target.closest("[data-info]") === tipFor) {
+    tip.classList.remove("show"); tipFor = null;
+  }
+});
+
+function openPanel(key) {
+  const ex = EXPLAIN[key];
+  if (!ex) return;
+  const { t, b } = ex();
+  document.getElementById("panelTitle").textContent = t;
+  document.getElementById("panelBody").innerHTML = b;
+  document.getElementById("panel").classList.add("open");
+}
+document.addEventListener("contextmenu", e => {
+  const t = e.target.closest("[data-info]");
+  if (t) { e.preventDefault(); openPanel(t.dataset.info); }
+});
+let lpTimer = null;
+document.addEventListener("touchstart", e => {
+  const t = e.target.closest("[data-info]");
+  if (!t) return;
+  lpTimer = setTimeout(() => { openPanel(t.dataset.info); lpTimer = null; }, 520);
+}, { passive: true });
+document.addEventListener("touchend", () => { if (lpTimer) clearTimeout(lpTimer); });
+document.addEventListener("touchmove", () => { if (lpTimer) clearTimeout(lpTimer); });
+document.getElementById("panelClose").addEventListener("click",
+  () => document.getElementById("panel").classList.remove("open"));
+
+// plate editing: click a readout before the first move to cycle it
+document.getElementById("plate").addEventListener("click", e => {
+  const t = e.target.closest("[data-info]");
+  if (!t) return;
+  const seg = state.B.plate.find(s => s.k === t.dataset.info);
+  if (!seg || !seg.edit) return;
+  if (state.eng.moves.length) {
+    message("board readouts are editable only before the first move \u2014 right-click to learn what this one means");
+    return;
+  }
+  if (seg.edit === "surface") {
+    const keys = Object.keys(SURFACES);
+    state.surface = keys[(keys.indexOf(state.surface) + 1) % keys.length];
+    if (!SURFACES[state.surface].meshes[state.mesh])
+      state.mesh = Object.keys(SURFACES[state.surface].meshes)[0];
+  } else if (seg.edit === "mesh") {
+    const keys = Object.keys(SURFACES[state.surface].meshes);
+    state.mesh = keys[(keys.indexOf(state.mesh) + 1) % keys.length];
+  } else if (seg.edit === "incidence") {
+    const modes = INC_OK[state.surface + ":" + state.mesh] ? INC_MODES : ["vertices"];
+    state.incidence = modes[(modes.indexOf(state.incidence) + 1) % modes.length];
+  } else {
+    state.scaleIdx = (state.scaleIdx + 1) %
+      SURFACES[state.surface].meshes[state.mesh].scales.length;
+  }
+  refreshSelectors(); refreshPaintOptions(); newBoard();
+});
+
+// ---------- input: rotate, zoom, pick ----------------------------------------
+
+const ray = new THREE.Raycaster();
+let downXY = null, dragging = false;
+
+function pickVertex(cx, cy) {
+  const rect = renderer.domElement.getBoundingClientRect();
+  const nd = new THREE.Vector2(((cx - rect.left) / rect.width) * 2 - 1,
+                               -((cy - rect.top) / rect.height) * 2 + 1);
+  ray.setFromCamera(nd, camera);
+  const inv = new THREE.Matrix4().copy(group.matrixWorld).invert();
+  const o = ray.ray.origin.clone().applyMatrix4(inv);
+  const d = ray.ray.direction.clone().transformDirection(inv).normalize();
+  const thresh = 0.5 * state.B.minEdge;
+  let best = -1, bestT = Infinity;
+  state.B.pos.forEach((p, i) => {
+    const vx = p[0] - o.x, vy = p[1] - o.y, vz = p[2] - o.z;
+    const t = vx * d.x + vy * d.y + vz * d.z;
+    if (t <= 0) return;
+    const px = vx - t * d.x, py = vy - t * d.y, pz = vz - t * d.z;
+    if (Math.hypot(px, py, pz) < thresh && t < bestT) { bestT = t; best = i; }
+  });
+  return best;
+}
+
+el.addEventListener("pointerdown", e => {
+  downXY = [e.clientX, e.clientY]; dragging = false;
+  el.setPointerCapture(e.pointerId);
+});
+el.addEventListener("pointermove", e => {
+  if (downXY) {
+    const dx = e.clientX - downXY[0], dy = e.clientY - downXY[1];
+    if (Math.hypot(dx, dy) > 4) dragging = true;
+    if (dragging) {
+      group.rotateOnWorldAxis(new THREE.Vector3(0, 1, 0), dx * 0.0055);
+      group.rotateOnWorldAxis(new THREE.Vector3(1, 0, 0), dy * 0.0055);
+      downXY = [e.clientX, e.clientY];
+    }
+    state.meshes.ghost.visible = false;
+    return;
+  }
+  const v = pickVertex(e.clientX, e.clientY);
+  const g = state.meshes.ghost;
+  const aiTurn = aiActive() &&
+    (state.ai.busy || state.eng.toMove === state.aiColor);
+  if (v >= 0 && state.eng.colors[v] === EMPTY && !state.over && !aiTurn) {
+    const p = stonePosition(state.B, v, stoneR);
+    g.position.set(p[0], p[1], p[2]);
+    if (!state.B.flatStones) orientStone(state.B, g, v);
+    g.material.color.set(state.eng.toMove === BLACK ? 0x2a323d : 0xf0ead9);
+    g.visible = true;
+  } else g.visible = false;
+});
+el.addEventListener("pointerup", e => {
+  const wasDrag = dragging || !downXY ||
+    Math.hypot(e.clientX - downXY[0], e.clientY - downXY[1]) > 7;
+  downXY = null; dragging = false;
+  if (wasDrag) return;
+  const v = pickVertex(e.clientX, e.clientY);
+  if (v >= 0) tryPlay(v);
+});
+el.addEventListener("pointerleave", () => { state.meshes.ghost.visible = false; });
+el.addEventListener("wheel", e => {
+  e.preventDefault();
+  camera.position.z = Math.min(11, Math.max(2.4,
+    camera.position.z + e.deltaY * 0.004));
+}, { passive: false });
+
+// ---------- selectors ---------------------------------------------------------
+
+function specCount(surface, mesh, idx) {
+  const sc = SURFACES[surface].meshes[mesh].scales[idx];
+  if (surface === "sphere")
+    return mesh === "tri" ? 10 * sc * sc + 2
+         : mesh === "square" ? 6 * sc * sc + 2 : 20 * sc * sc;
+  if (surface === "box") return sc * sc * sc;
+  return sc[0] * sc[1];
+}
+
+function refreshSelectors() {
+  const sSel = document.getElementById("surface");
+  const mSel = document.getElementById("mesh");
+  const cSel = document.getElementById("scale");
+  sSel.innerHTML = Object.keys(SURFACES).map(k =>
+    '<option value="' + k + '"' + (k === state.surface ? " selected" : "") +
+    ">" + SURFACES[k].label + "</option>").join("");
+  const meshes = Object.keys(SURFACES[state.surface].meshes);
+  if (!meshes.includes(state.mesh)) state.mesh = meshes[0];
+  mSel.innerHTML = ["tri", "square", "hex"].map(k => {
+    const ok = meshes.includes(k);
+    return '<option value="' + k + '"' + (k === state.mesh ? " selected" : "") +
+      (ok ? "" : " disabled") + ">" + MESH_LABELS[k] +
+      (ok ? "" : " \u2014 n/a") + "</option>";
+  }).join("");
+  const nScales = SURFACES[state.surface].meshes[state.mesh].scales.length;
+  if (state.scaleIdx >= nScales) state.scaleIdx = nScales - 1;
+  cSel.innerHTML = SURFACES[state.surface].meshes[state.mesh].scales.map(
+    (sc, i) => '<option value="' + i + '"' +
+      (i === state.scaleIdx ? " selected" : "") + ">" + SCALE_LABELS[i] +
+      " \u00B7 V " + specCount(state.surface, state.mesh, i) + "</option>"
+  ).join("");
+  refreshIncidenceOptions();
+  refreshOpponentOptions();
+}
+
+function refreshIncidenceOptions() {
+  const ok = !!INC_OK[state.surface + ":" + state.mesh];
+  if (!ok) state.incidence = "vertices";
+  document.getElementById("incidence").innerHTML = INC_MODES.map(m => {
+    const avail = m === "vertices" || ok;
+    return '<option value="' + m + '"' +
+      (m === state.incidence ? " selected" : "") +
+      (avail ? "" : " disabled") + ">" + INC_LABELS[m] +
+      (avail ? "" : " \u2014 n/a") + "</option>";
+  }).join("");
+}
+
+function refreshOpponentOptions() {
+  const o = document.getElementById("opponent");
+  const many = GeoAI.models.length > 1;
+  const opts = ['<option value="human">Opponent: human</option>'];
+  let currentOk = state.opponent === "human";
+  for (const m of GeoAI.models) {
+    const ok = modelSupports(m, state.surface, state.mesh, state.incidence,
+                             state.scaleIdx);
+    for (const lv of m.levels) {
+      const val = "ai:" + m.id + ":" + lv;
+      if (val === state.opponent && ok) currentOk = true;
+      opts.push('<option value="' + val + '"' + (ok ? "" : " disabled") +
+        (val === state.opponent && ok ? " selected" : "") + ">AI" +
+        (many ? " \u00B7 " + m.name : "") + " \u00B7 " + lv +
+        (ok ? "" : " \u2014 n/a") + "</option>");
+    }
+  }
+  if (!currentOk && state.opponent !== "human") {
+    state.opponent = "human";
+    cancelAI(); state.ai.engine = null;
+  }
+  o.innerHTML = opts.join("");
+  o.value = state.opponent;
+  const c = document.getElementById("aiColor");
+  c.innerHTML =
+    '<option value="2">AI plays White</option>' +
+    '<option value="1">AI plays Black</option>';
+  c.value = String(state.aiColor);
+  c.hidden = !aiActive();
+}
+
+function refreshPaintOptions() {
+  const p = document.getElementById("paint");
+  const cellsOk = !!CELLS_OK[state.surface + ":" + state.mesh] &&
+                  state.incidence === "vertices";
+  if (!cellsOk && state.paint === "cells") state.paint = "ink";
+  p.innerHTML = [
+    ["ink", "Paint: ink"], ["vertex", "Paint: vertices"],
+    ["edge", "Paint: edges"], ["cells", "Paint: cells" + (cellsOk ? "" : " \u2014 n/a")],
+  ].map(([k, l]) => '<option value="' + k + '"' +
+    (k === state.paint ? " selected" : "") +
+    (k === "cells" && !cellsOk ? " disabled" : "") + ">" + l + "</option>").join("");
+}
+
+document.getElementById("surface").addEventListener("change", e => {
+  state.surface = e.target.value;
+  refreshSelectors(); refreshPaintOptions(); newBoard();
+});
+document.getElementById("mesh").addEventListener("change", e => {
+  state.mesh = e.target.value;
+  refreshSelectors(); refreshPaintOptions(); newBoard();
+});
+document.getElementById("scale").addEventListener("change", e => {
+  state.scaleIdx = +e.target.value;
+  refreshSelectors(); newBoard();
+});
+document.getElementById("incidence").addEventListener("change", e => {
+  state.incidence = e.target.value;
+  refreshSelectors(); refreshPaintOptions(); newBoard();
+});
+document.getElementById("opponent").addEventListener("change", e => {
+  state.opponent = e.target.value;
+  document.getElementById("aiColor").hidden = !aiActive();
+  aiRebuild(); scheduleAI();
+});
+document.getElementById("aiColor").addEventListener("change", e => {
+  state.aiColor = +e.target.value;
+  scheduleAI();
+});
+document.getElementById("paint").addEventListener("change", e => {
+  state.paint = e.target.value;
+  paintDots(state.B); paintEdges(state.B);
+  if (state.meshes.cellMesh)
+    state.meshes.cellMesh.visible = state.paint === "cells";
+});
+document.getElementById("passBtn").addEventListener("click", () => {
+  doPass(); renderPlate();
+});
+document.getElementById("undoBtn").addEventListener("click", doUndo);
+document.getElementById("newBtn").addEventListener("click", () => newBoard());
+document.getElementById("shareBtn").addEventListener("click", openShare);
+document.getElementById("shareCopy").addEventListener("click", copyShare);
+document.getElementById("shareLoad").addEventListener("click", () => {
+  const t = document.getElementById("shareIn").value;
+  if (t.trim()) {
+    document.getElementById("shareModal").classList.remove("open");
+    loadShare(t);
+  }
+});
+document.getElementById("shareClose").addEventListener("click",
+  () => document.getElementById("shareModal").classList.remove("open"));
+document.getElementById("shareModal").addEventListener("click", e => {
+  if (e.target.id === "shareModal")
+    document.getElementById("shareModal").classList.remove("open");
+});
+document.getElementById("paToggle").addEventListener("change", e => {
+  state.showPA = e.target.checked; sync();
+});
+
+// ---------- boot ---------------------------------------------------------------
+
+function resize() {
+  const w = el.clientWidth, h = el.clientHeight;
+  renderer.setSize(w, h, false);
+  camera.aspect = w / h;
+  camera.updateProjectionMatrix();
+}
+addEventListener("resize", resize);
+
+refreshSelectors();
+refreshPaintOptions();
+newBoard(false);
+resize();
+try {
+  if (location.hash && location.hash.startsWith("#g=")) loadShare(location.hash);
+  else syncHash();
+} catch (e) { /* no hash in sandbox */ }
+group.rotation.x = 0.35; group.rotation.y = -0.5;
+bridgeConnect();
+(function loop() { requestAnimationFrame(loop); renderer.render(scene, camera); })();
+
+</script>
+</body>
+</html>
