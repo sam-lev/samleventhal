@@ -797,23 +797,28 @@ function sync() {
   const pa = state.showPA
     ? new Set([...eng.passAlive(BLACK), ...eng.passAlive(WHITE)])
     : new Set();
-  const owner = state.over ? eng.score().owner : null;
+  const sc = state.over ? eng.score() : null;
+  const owner = sc ? sc.owner : null;
+  const dead = sc ? sc.dead : null;
   eng.colors.forEach((c, i) => {
-    if (c === EMPTY) {
-      if (owner && owner[i]) {
-        const d = state.meshes.dots[i];
+    const isDead = dead && dead.has(i);
+    if (c === EMPTY || isDead) {
+      if (owner && owner[i]) {           // territory: dead stones now count
+        const d = state.meshes.dots[i];  // for whoever surrounds them
         d.material.color.set(owner[i] === BLACK ? 0x2c343f : 0xf2ecdd);
         d.material.opacity = 1.0;
         d.scale.setScalar(1.8);
       }
-      return;
+      if (c === EMPTY) return;           // empty point: dot only
     }
     const mat = new THREE.MeshLambertMaterial({
       color: c === BLACK ? 0x1b2129 : 0xf0ead9 });
-    if (pa.has(i)) { mat.emissive = new THREE.Color(0x1d5a4e); }
+    if (isDead) { mat.transparent = true; mat.opacity = 0.26; }
+    else if (pa.has(i)) { mat.emissive = new THREE.Color(0x1d5a4e); }
     const m = new THREE.Mesh(stoneGeo, mat);
     if (!B.flatStones) { m.scale.set(1, 0.62, 1); orientStone(B, m, i); }
     else m.scale.setScalar(0.9);
+    if (isDead) m.scale.multiplyScalar(0.58);
     const p = stonePosition(B, i, stoneR);
     m.position.set(p[0], p[1], p[2]);
     group.add(m);
@@ -845,11 +850,14 @@ function renderStatus() {
   const stat = document.getElementById("status");
   if (state.over) {
     const s = eng.score();
+    const nd = s.removedBlack + s.removedWhite;
     stat.innerHTML =
       span("stat.score", "game over \u2014 " + s.winner +
         (s.winner === "Draw" ? "" : " by " + Math.abs(s.margin).toFixed(1))) +
       " \u00B7 " + span("stat.score", "B " + s.black + " : W " + s.white) +
-      " \u00B7 " + span("stat.komi", "komi 7.5");
+      " \u00B7 " + span("stat.komi", "komi 7.5") +
+      (nd ? " \u00B7 " + span("stat.score",
+        nd + " dead removed") : "");
     return;
   }
   stat.innerHTML =
@@ -907,7 +915,7 @@ function doPass(byAI) {
   const r = state.eng.pass();
   if (r.over) {
     state.over = true;
-    message("two passes \u2014 territory scored (Tromp\u2013Taylor)", 0);
+    message("two passes \u2014 dead stones removed, then area scored", 0);
   } else message((state.eng.toMove === BLACK ? "Black" : "White") + " to play after pass");
   sync(); syncHash();
   scheduleAI();
@@ -1280,14 +1288,14 @@ const EXPLAIN = {
     b: "Total moves played, including passes. Two consecutive passes end the game and trigger scoring. The full move list is what the Share code carries." }),
   "stat.komi": () => ({ t: "komi 7.5",
     b: "Compensation added to White's score for moving second. The half point guarantees no draws." }),
-  "stat.score": () => ({ t: "Tromp\u2013Taylor area scoring",
-    b: "Score = your stones on the board + empty regions whose border touches only your color (+ komi for White). Empty regions touching both colors count for no one. Enlarged dots show territory ownership. This definition needs nothing but the graph \u2014 no notion of 'inside' \u2014 which is why it survives every topology unchanged." }),
+  "stat.score": () => ({ t: "Tromp\u2013Taylor area scoring, dead stones removed",
+    b: "At two passes, stones that are not unconditionally alive and are sealed inside an opponent's pass-alive enclosure are removed as dead (translucent), turning into that opponent's territory. The board is then scored by area: your remaining stones + empty regions bordering only your color (+ komi for White). Removal is provably safe \u2014 in seki or unsettled shapes nothing is taken, giving plain Tromp\u2013Taylor \u2014 and, being defined purely on the graph via Benson's theorem, it survives every topology unchanged." }),
   "opt.passalive": () => ({ t: "pass-alive (Benson 1976)",
     b: "Stones glow jade when they are unconditionally alive: the opponent cannot capture them even if the owner passes forever. Computed as a greatest fixpoint \u2014 repeatedly discard chains with fewer than two vital enclosed regions, and regions bordered by discarded chains, until stable. Benson's theorem is stated purely in graph terms, so it holds verbatim on spheres, tori, M\u00F6bius bands and 3D lattices." }),
   "opt.paint": () => ({ t: "paint \u2014 incidence colorings",
     b: "Color the board's incidence structure. <b>Vertices</b>: a proper graph coloring \u2014 adjacent points always differ; the number of colors needed is the chromatic number (a plain grid needs 2; add diagonals or odd wraps and it grows). <b>Edges</b>: a proper edge coloring \u2014 edges meeting at a vertex differ (Vizing: \u0394 or \u0394+1 colors suffice). <b>Cells</b>: faces colored so faces sharing an edge differ \u2014 watch the seams on quotient boards, where a checkerboard can fail to close up. The brass dots are the mesh's curvature defects." }),
   "act.pass": () => ({ t: "pass",
-    b: "Decline to place a stone. Two consecutive passes end the game and the position is scored as it stands (Tromp\u2013Taylor: dead stones are not removed by agreement \u2014 capture them before passing)." }),
+    b: "Decline to place a stone. Two consecutive passes end the game; dead stones (not pass-alive, sealed inside an opponent's pass-alive enclosure) are then removed and the position is scored by area. Genuinely unsettled groups are never auto-removed, so if a boundary is still open, play it out rather than passing." }),
   "act.undo": () => ({ t: "undo",
     b: "Rewinds one move (including the superko history, so a retracted position becomes playable again)." }),
   "act.new": () => ({ t: "new board",

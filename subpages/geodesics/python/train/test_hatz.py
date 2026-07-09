@@ -205,5 +205,55 @@ for lvl in ("casual", "standard", "strong"):
 ok(bot_ok and seam_seen, "bridge bot: reconstructs the Mobius seam from the "
    "request, plays legally at all levels, reports non-orientability")
 
+# ---- curriculum resume ---------------------------------------------------------
+
+ck_small = "/tmp/hatz_small.npz"
+ck_cur = "/tmp/hatz_cur.npz"
+for f in (ck_small, ck_cur):
+    if os.path.isfile(f):
+        os.remove(f)
+r1 = subprocess.run(
+    [sys.executable, os.path.join(HERE, "train_hatz.py"),
+     "--specs", "mobius", "--iters", "1", "--games-per-iter", "2",
+     "--sims", "8", "--steps-per-iter", "4", "--batch", "6",
+     "--eval-every", "1", "--seed", "5", "--checkpoint", ck_small],
+    capture_output=True, text=True)
+r2 = subprocess.run(
+    [sys.executable, os.path.join(HERE, "train_hatz.py"),
+     "--specs", "mobius2", "--iters", "1", "--games-per-iter", "2",
+     "--sims", "8", "--steps-per-iter", "4", "--batch", "6",
+     "--eval-every", "1", "--seed", "6", "--resume", ck_small,
+     "--checkpoint", ck_cur],
+    capture_output=True, text=True)
+resume_ok = (r1.returncode == 0 and r2.returncode == 0
+             and os.path.isfile(ck_cur) and "resumed from" in r2.stdout)
+if resume_ok:
+    net_cur = HATZ.load(ck_cur)
+    # supports must now cover BOTH the small and the medium board's surface
+    resume_ok = net_cur.meta.get("specs") == ["mobius", "mobius2"]
+else:
+    print(r2.stdout[-400:], r2.stderr[-400:])
+ok(resume_ok, "curriculum: --resume warm-starts from a small-board checkpoint "
+   "onto a medium board and unions spec provenance")
+
+# weights actually carried over (not re-initialized): a resumed 0-step run
+# leaves parameters identical to the checkpoint
+ck_a, ck_b = "/tmp/hatz_ra.npz", "/tmp/hatz_rb.npz"
+subprocess.run(
+    [sys.executable, os.path.join(HERE, "train_hatz.py"), "--specs", "mobius",
+     "--iters", "1", "--games-per-iter", "2", "--sims", "8",
+     "--steps-per-iter", "0", "--eval-every", "1", "--seed", "5",
+     "--checkpoint", ck_a], capture_output=True, text=True)
+subprocess.run(
+    [sys.executable, os.path.join(HERE, "train_hatz.py"), "--specs", "mobius",
+     "--iters", "1", "--games-per-iter", "1", "--sims", "8",
+     "--steps-per-iter", "0", "--eval-every", "1", "--seed", "9",
+     "--resume", ck_a, "--checkpoint", ck_b],
+    capture_output=True, text=True)
+na, nb = HATZ.load(ck_a), HATZ.load(ck_b)
+identical = all(np.allclose(na.p[k], nb.p[k]) for k in na.p)
+ok(identical, "curriculum: resumed weights are the checkpoint's (0 training "
+   "steps leaves every parameter unchanged)")
+
 print(f"\n{passed} passed, {failed} failed")
 sys.exit(1 if failed else 0)

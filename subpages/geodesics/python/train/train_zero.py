@@ -253,6 +253,9 @@ def main():
     ap.add_argument("--seed", type=int, default=1)
     ap.add_argument("--checkpoint", default=os.path.join(CKPT_DIR,
                                                          "zero_mini.npz"))
+    ap.add_argument("--resume", default=None, metavar="CKPT",
+                    help="warm-start weights from a checkpoint; its "
+                         "--hidden/--layers override the CLI (for curriculum)")
     ap.add_argument("--export-web", default=None, metavar="MODEL_ID",
                     help="after training, also export a browser-native model "
                          "into web/models/ under this id")
@@ -266,10 +269,22 @@ def main():
     for k in keys:
         b = board_for(k)
         boards[k] = (b, mean_matrix(b.adj))
-    net = ZeroNet(hidden=args.hidden, layers=args.layers, seed=args.seed)
-    net.meta = {"specs": keys,
-                "surfaces": sorted({SPECS[k][0] for k in keys}),
-                "meshes": sorted({SPECS[k][1] for k in keys})}
+    if args.resume:
+        if not os.path.isfile(args.resume):
+            sys.exit(f"--resume: no checkpoint at {args.resume}")
+        net = ZeroNet.load(args.resume)
+        if net.hidden != args.hidden or net.layers != args.layers:
+            print(f"resume: using checkpoint architecture hidden={net.hidden} "
+                  f"layers={net.layers} (CLI ignored)")
+        print(f"resumed from {args.resume} "
+              f"(previously trained on {net.meta.get('specs', 'unknown')})")
+    else:
+        net = ZeroNet(hidden=args.hidden, layers=args.layers, seed=args.seed)
+    seen = sorted(set(net.meta.get("specs", [])) | set(keys)) \
+        if args.resume else keys
+    net.meta = {"specs": seen,
+                "surfaces": sorted({SPECS[k][0] for k in seen}),
+                "meshes": sorted({SPECS[k][1] for k in seen})}
     buf = deque(maxlen=args.buffer)
     rng = np.random.default_rng(args.seed)
     os.makedirs(CKPT_DIR, exist_ok=True)

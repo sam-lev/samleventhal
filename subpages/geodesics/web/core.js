@@ -335,20 +335,62 @@ function Engine(adj, opts) {
 
   self.gameOver = () => self.passes >= 2;
 
-  self.score = function () {
+  self.score = function (opts) {
+    opts = opts || {};
+    const removeDead = opts.removeDead !== false;   // default on
+    // --- dead-stone removal via Benson pass-alive enclosure ---
+    // A stone is dead iff it is not unconditionally alive (Benson) and the
+    // maximal empty/not-pass-alive region containing it is bordered only by
+    // the opponent's pass-alive stones. This is provably safe: a group
+    // enclosed by stones that can never be captured, which is not itself
+    // pass-alive, cannot avoid capture, so it is the opponent's territory.
+    // In unsettled positions and seki the border is mixed or has no
+    // pass-alive stones, so nothing is removed and the result is exactly
+    // Tromp-Taylor. Benson is graph-theoretic, so this holds on every
+    // surface (sphere, torus, Mobius, Klein, RP2, 3D) unchanged.
+    const eff = self.colors.slice();
+    const removed = [0, 0, 0];
+    const dead = new Set();
+    if (removeDead) {
+      const pa = new Set();
+      for (const c of [BLACK, WHITE])
+        for (const v of self.passAlive(c)) pa.add(v);
+      const seenC = new Set();
+      for (let v = 0; v < n; v++) {
+        if (!(self.colors[v] === EMPTY || !pa.has(v)) || seenC.has(v)) continue;
+        const comp = [v], st = [v], bord = new Set();
+        seenC.add(v);
+        while (st.length) {
+          const u = st.pop();
+          for (const w of adj[u]) {
+            if (self.colors[w] === EMPTY || !pa.has(w)) {
+              if (!seenC.has(w)) { seenC.add(w); comp.push(w); st.push(w); }
+            } else bord.add(self.colors[w]);     // an adjacent pass-alive stone
+          }
+        }
+        if (bord.size === 1) {
+          const enemy = [...bord][0] === BLACK ? WHITE : BLACK;
+          for (const u of comp)
+            if (self.colors[u] === enemy) {
+              eff[u] = EMPTY; dead.add(u); removed[enemy]++;
+            }
+        }
+      }
+    }
+    // --- Tromp-Taylor area scoring on the cleaned board ---
     const terr = [0, 0, 0];
     const stones = [0, 0, 0];
-    for (const c of self.colors) stones[c]++;
+    for (const c of eff) stones[c]++;
     const seen = new Set();
     const owner = new Array(n).fill(0);       // territory owner per empty vertex
     for (let v = 0; v < n; v++) {
-      if (self.colors[v] !== EMPTY || seen.has(v)) continue;
+      if (eff[v] !== EMPTY || seen.has(v)) continue;
       const comp = [v], border = new Set(), st = [v];
       seen.add(v);
       while (st.length) {
         const u = st.pop();
         for (const w of adj[u]) {
-          const c = self.colors[w];
+          const c = eff[w];
           if (c === EMPTY) {
             if (!seen.has(w)) { seen.add(w); comp.push(w); st.push(w); }
           } else border.add(c);
@@ -360,7 +402,8 @@ function Engine(adj, opts) {
     }
     const b = stones[BLACK] + terr[BLACK];
     const w = stones[WHITE] + terr[WHITE] + self.komi;
-    return { black: b, white: w, margin: b - w, owner,
+    return { black: b, white: w, margin: b - w, owner, dead,
+             removedBlack: removed[BLACK], removedWhite: removed[WHITE],
              winner: b > w ? "Black" : w > b ? "White" : "Draw" };
   };
 

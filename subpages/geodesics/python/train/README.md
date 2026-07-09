@@ -99,6 +99,24 @@ KataGo-style global pooling.
     python3 train_hatz.py --specs mobius,klein,rp2 --iters 100
     python3 train_hatz.py --iters 150        # all lowest topologies
 
+**Curriculum (cheapest route to strong medium-board play on a laptop).**
+Deeper search is what medium boards need, and it is expensive from a cold
+start; instead reach parity fast on the small boards, then warm-continue
+onto the medium set — the network is graph-agnostic, so weights transfer:
+
+    python3 train_hatz.py --specs sphere,mobius,klein,rp2,plane \
+        --iters 60 --sims 64 --checkpoint checkpoints/hatz_small.npz
+    python3 train_hatz.py --specs sphere2,mobius2,klein2,rp22,plane9 \
+        --iters 60 --sims 96 --resume checkpoints/hatz_small.npz \
+        --checkpoint checkpoints/hatz_medium.npz
+
+`--resume` restores weights and adopts the checkpoint's architecture (its
+`--hidden`/`--layers` win, so you cannot shape-mismatch), and unions the
+spec provenance so the served model advertises every board it has seen.
+`train_zero.py` takes the same flag. Note medium boards want more sims
+(24 is too shallow past ~50 vertices — the policy target is too weak to
+bootstrap, and vs-random stalls below 0.5 while loss keeps falling).
+
 **v2 (the joint synthesis):** the pooling Morse function is now the
 network's own mid-depth ownership prediction (supervised, not relaxed;
 regions = connected components of its interlevel sets, exactly

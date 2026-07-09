@@ -115,6 +115,10 @@ def main():
     ap.add_argument("--lr", type=float, default=1e-3)
     ap.add_argument("--eval-every", type=int, default=5)
     ap.add_argument("--gauge-aug", type=int, default=1)
+    ap.add_argument("--resume", default=None, metavar="CKPT",
+                    help="warm-start weights (and Adam state) from a "
+                         "checkpoint; its --hidden/--layers override the CLI, "
+                         "so curriculum runs onto bigger boards just work")
     ap.add_argument("--seed", type=int, default=1)
     ap.add_argument("--checkpoint", default=os.path.join(CKPT_DIR,
                                                          "hatz.npz"))
@@ -128,10 +132,25 @@ def main():
     for k in keys:
         b = board_for(k)
         boards[k] = (b, Bundle(b, SPECS[k][0]))
-    net = HATZ(hidden=args.hidden, layers=args.layers, seed=args.seed)
-    net.meta = {"arch": "hatz", "version": 2, "specs": keys,
-                "surfaces": sorted({SPECS[k][0] for k in keys}),
-                "meshes": sorted({SPECS[k][1] for k in keys})}
+    if args.resume:
+        if not os.path.isfile(args.resume):
+            sys.exit(f"--resume: no checkpoint at {args.resume}")
+        net = HATZ.load(args.resume)
+        if net.hidden != args.hidden or net.layers != args.layers:
+            print(f"resume: using checkpoint architecture "
+                  f"hidden={net.hidden} layers={net.layers} "
+                  f"(CLI --hidden/--layers ignored)")
+        prev = net.meta.get("specs", [])
+        print(f"resumed from {args.resume} "
+              f"(previously trained on {prev or 'unknown'})")
+    else:
+        net = HATZ(hidden=args.hidden, layers=args.layers, seed=args.seed)
+    # union spec provenance so a curriculum's supports cover every board seen
+    seen_specs = sorted(set(net.meta.get("specs", [])) | set(keys)) \
+        if args.resume else keys
+    net.meta = {"arch": "hatz", "version": 2, "specs": seen_specs,
+                "surfaces": sorted({SPECS[k][0] for k in seen_specs}),
+                "meshes": sorted({SPECS[k][1] for k in seen_specs})}
     buf = deque(maxlen=args.buffer)
     rng = np.random.default_rng(args.seed)
     os.makedirs(CKPT_DIR, exist_ok=True)

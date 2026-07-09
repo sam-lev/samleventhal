@@ -130,5 +130,41 @@ console.log("all JS core checks passed");
   catch (e) { threw = true; }
   assert(threw, "share rejects garbage");
 
+  // --- dead-stone removal in scoring (Benson enclosure) ---
+  // 5x5: a single white stone at center, walled off by a black square that
+  // has two eyes -> black pass-alive, white dead and removed.
+  function grid5() {
+    const N = [];
+    for (let r = 0; r < 5; r++) for (let c = 0; c < 5; c++) {
+      const a = [];
+      if (c > 0) a.push(r * 5 + c - 1);
+      if (c < 4) a.push(r * 5 + c + 1);
+      if (r > 0) a.push((r - 1) * 5 + c);
+      if (r < 4) a.push((r + 1) * 5 + c);
+      N.push(a);
+    }
+    return N;
+  }
+  const ge = C.Engine(grid5(), { komi: 0.5 });
+  // black frame with interior; white stone trapped at 12 (center)
+  const B = [1, 2, 3, 5, 9, 10, 14, 15, 19, 21, 22, 23, 6, 8, 16, 18];
+  const idx = (r, c) => r * 5 + c;
+  // build directly: place a black ring around center leaving two eyes
+  ge.colors = new Array(25).fill(0);
+  for (const v of [1,2,3,5,9,11,13,15,19,21,22,23,7,17]) ge.colors[v] = 1; // black
+  ge.colors[12] = 2;                                   // trapped white stone
+  const raw = ge.score({ removeDead: false });
+  const fix = ge.score();
+  assert(fix.removedWhite >= 1 && raw.white > fix.white,
+    "dead white stone removed from area score");
+  assert(fix.dead.has(12), "the enclosed white stone is marked dead");
+  // seki-like / unsettled: two adjacent lone stones, neither pass-alive
+  const gu = C.Engine(grid5(), { komi: 0.5 });
+  gu.colors = new Array(25).fill(0);
+  gu.colors[12] = 1; gu.colors[13] = 2;
+  const su = gu.score();
+  assert(su.removedBlack === 0 && su.removedWhite === 0,
+    "no pass-alive enclosure -> nothing removed (plain Tromp-Taylor)");
+
   console.log("v0.2 core tests passed");
 })();
