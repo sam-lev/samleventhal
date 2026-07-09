@@ -1,4 +1,16 @@
 [
+    {
+	"slug": "holonomy-aware_topological_alphazero",
+	"title": "Holonomy-Aware Topological AlphaZero: Learning to Play Go on Topological Abstractions",
+	"date": "2026-07-09",
+	"excerpt": "Topologically and geometrically generalizable AI on meshes. Abstracting Go beyond the square grid needs a genuinely different kind of network.",
+	    "tags": [
+      "topology",
+      "games",
+        "topological deep learning",
+        "Go"
+    ]
+    },
   {
     "slug": "geodesics-topological-go",
       "title": "Geodesics: an Algebraic Topological Abstraction of Go - Connectivity and Incidence Generalized.",
@@ -7,7 +19,8 @@
     "tags": [
       "topology",
       "games",
-      "creative coding"
+	"topological deep learning",
+	"Go"
     ]
   },
   {
