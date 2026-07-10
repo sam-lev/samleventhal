@@ -26,11 +26,11 @@ F32 = np.float32
 DEFAULT_WEIGHTS = {
     "diffusion": {
         "blocks": [
-            {"steps": 3, "self": 0.5, "n1": 0.36, "n2": 0.14},
-            {"steps": 2, "self": 0.55, "n1": 0.33, "n2": 0.12},
+            {"steps": 3, "self": 0.5, "n1": 0.36, "n2": 0.14},#  {"steps": 3, "self": 0.5, "n1": 0.36, "n2": 0.14},
+            {"steps": 2, "self": 0.55, "n1": 0.33, "n2": 0.12},# {"steps": 2, "self": 0.55, "n1": 0.33, "n2": 0.12},
         ],
     },
-    "pyramid": {"maxLevels": 4, "minSize": 24, "steps": 3, "self": 0.5,
+    "pyramid": {"maxLevels": 6, "minSize": 12, "steps": 3, "self": 0.5,#"maxLevels": 4, "minSize": 24, "steps": 3, "self": 0.5,
                 "n1": 0.5, "mix": [1.0, 0.6, 0.38, 0.24]},
     "msc": {
         "enabled": True,
