@@ -1,50 +1,94 @@
-"""hatz.py — Holonomy-Aware Topological AlphaZero, v1 (numpy, no deps).
+"""hatz.py — Holonomy-Aware Topological AlphaZero, v3 (numpy, no deps).
 
-A first draft of the Stage-2 research architecture, scoped to what can be
-implemented honestly and lightly:
+v1 established the Z2/reflection gauge structure (orientation cocycle eps
+from face cycles or quotient gluings), sheaf-style eps-conditioned transport
+T(u->v) = W0 + eps(u,v) W1 with globally shared maps, cell-rank V-E-F
+message passing, Morse-Smale pooling, and exact automorphism equivariance of
+the weight-shared core. v2 added Cayley-orthogonal transport, an
+outcome-supervised GIN-eps co-ownership edge filtration with fixed
+thresholds and per-node attention over the resulting levels, and
+ownership-driven interlevel-set pooling (component pooling of the mid-depth
+ownership field, which stays equivariant where basin tie-breaking does not).
 
-1. **Z2 / reflection gauge structure.** Full O(2)-steerability needs tangent
-   frames; what non-orientability *forces* (Weiler et al. 2021) is the
-   reflection part, realized combinatorially as an orientation cocycle
-   eps: E -> {+1,-1}. eps is computed from face cycles by dual-BFS when faces
-   exist, and analytically for the quotient grids (the flipped gluing is the
-   seam: x-wrap edges on Mobius/Klein, both wraps on RP2). Cycle holonomy
-   (product of eps around a loop) is gauge-invariant; the seam itself is a
-   representative of w1.
+v3, this file:
 
-2. **Sheaf-style transport.** Messages along vertex edges are passed through
-   restriction maps conditioned on the cocycle: T(u->v) = W0 + eps(u,v) W1,
-   with W0, W1 *shared globally* (transfer across boards) rather than
-   per-edge (Neural Sheaf Diffusion's per-edge maps don't transfer). Crossing
-   the orientation seam therefore applies a genuinely different learned map.
-   Because eps enters linearly, the whole layer reduces to two fixed
-   aggregation matrices A and A_eps — plain matmuls, hand-differentiable.
+1. **Persistence-pair injection.** The H0 persistence pairs of the
+   phi-filtration (phi = the learned co-ownership potential per edge) are
+   computed by a descending Kruskal sweep and injected additively into the
+   vertex and edge embeddings: every vertex carries the (birth, death,
+   lifetime, essential) of the superlevel component it was born into, every
+   edge carries its pairing role (tree edge that killed a class / cycle edge
+   that births an H1 class) and the lifetime it terminated. The hierarchy
+   therefore carries not just level membership but the topological lifetime
+   of every connection. Pairing and values are structure (stop-grad); phi's
+   gradient path is its own co-ownership supervision.
 
-3. **Cell ranks.** Vertex and edge features always; face features when the
-   board provides face cycles (currently spheres). Messages pass over the
-   incidence structure (V<->E<->F), a light CW-network.
+2. **Learned quantile thresholds (Hofer-style differentiable filtration).**
+   Instead of fixed thresholds (0.75, 0.5, full), level l keeps edges with
+   phi >= p_l where p_l is the *interpolated empirical quantile* of the
+   current phi distribution at a learned fraction sigmoid(qraw_l). Hard
+   keeps and hard-count row normalization are structure (stop-grad); a soft
+   gate sigma((phi_e - p_l)/tau) multiplies each kept edge, carrying
+   gradient to phi_e, to p_l, and through the interpolated quantile to the
+   two bracketing order statistics of phi and to qraw. As heterophily rises
+   through a game the levels slide to track the actual contact structure:
+   early game the phi distribution is tight and the levels cluster near the
+   full graph; in a midgame contact fight phi spreads and the levels
+   separate to isolate the fight. No relaxation of the combinatorics is
+   needed — exactly the split Hofer et al. (2020) exploit.
 
-4. **Morse–Smale pooling.** The influence field's ascending/descending basin
-   partition (reusing hgnn.basin_hierarchy — the same code that powers the
-   browser engine) gives a position-dependent, parameter-independent pooling
-   matrix: pool to regions, message-pass on the region graph, unpool, add
-   residually. No gradients flow through the segmentation itself, so
-   backprop stays exact.
+3. **Successive-training curriculum.** forward() takes levels_active: the
+   attention mixes only the first levels_active levels (most homophilous
+   first). Early self-play iterations train on the cleanest co-ownership
+   level (separable chains, where a stalled policy can actually learn),
+   then heterophilous levels are annealed in (train_hatz.py --curriculum).
 
-5. **Automorphism equivariance** is inherited exactly: weight-shared message
-   passing commutes with every graph automorphism, and all inputs are
-   Aut-invariant by construction (no positional encodings). Verified in
-   tests via WL-orbit constancy of the empty-board policy.
+4. **Cayley-geometric transport (between copresheaf and gauge).** The
+   copresheaf restriction maps are constrained orthogonal by the Cayley
+   parameterization, and the transport is *initialized at the mesh's actual
+   parallel transporter*: messages are rotated by the discrete Levi-Civita
+   angle theta_{u<-v} (2x2 blocks on channel pairs; exact on boards with 3D
+   coords + faces, identity on flat boards) and then passed through the
+   Cayley map W0, whose raw parameter starts at 0 so W0 = I. At
+   initialization the layer is exactly the gauge convolution's geometric
+   transporter; self-play deforms W0 away from I while orthogonality — the
+   gauge conv's key virtue — is guaranteed for every step. On non-orientable
+   boards the sin channel is zeroed exactly: w1 obstructs a globally
+   consistent rotation sign, and the seam crossing is carried by the
+   reflection-aware eps path (W1) instead. Frame choice is a gauge; like
+   the eps gauge it is randomized by with_gauge() during training so
+   invariance is learned rather than assumed.
 
-Also: PH-lite tactical inputs (group size/liberties = localized H0 data),
-curvature (angle defect) where coords+faces allow, a KataGo-style global
-pooling bias, and an ownership auxiliary head.
+5. **Morse-flow directed propagation.** The NeurIPS'22 segmentation stops
+   being only a pooling operator and becomes the routing of message
+   passing. Let f be the mid-depth ownership field (already computed,
+   already supervised). Its discrete gradient orients edges; the ascending
+   basins of f (steepest-ascent union-find, <=-persistence merge for
+   equivariant plateau handling) partition the board. Every aggregation at
+   layers l >= 1 is split into three learned channels by an edge's role
+   relative to the flow: ascending (lower -> higher f inside a basin, W_up),
+   descending (W_dn), and lateral/separatrix (edges between different
+   basins — the ridges where ascending flows diverge — plus in-basin
+   plateau ties, W_lat):
 
-Known v1 gaps, stated plainly: no continuous SO(2) part (isotropic
-aggregation), eps is used in a fixed canonical gauge per board (holonomy
-features are gauge-invariant; the learned transport is gauge-covariant only
-up to reparameterization), and PH features are local proxies rather than
-full persistence diagrams.
+       m_v = W_up  . mean over up-neighbors
+           + W_dn  . mean over down-neighbors
+           + W_lat . mean over cross-basin neighbors.
+
+   Isotropic MP averages all three; this distinguishes them, and the
+   separatrix channel makes contested boundaries — where Go fights live —
+   first-class carriers of information rather than edges averaged away.
+   A node near a contested boundary receives ascending messages from its
+   own basin distinctly from lateral messages across the ridge, so it can
+   represent "on the Black side of a fight with White pressing from that
+   direction", which mean aggregation cannot express. Basin labels are
+   structure (stop-grad); f's gradient path is its own supervision.
+
+Known gaps, stated plainly: transport frames (like the canonical eps
+gauge) break *exact* orbit equivariance on curved boards — it is trained
+toward invariance by frame-gauge augmentation, and remains exact on flat
+boards where theta = 0; PH features are H0 of the phi-filtration rather
+than full multiparameter persistence.
 """
 
 from __future__ import annotations
@@ -202,6 +246,72 @@ def angle_defect(board):
     return out
 
 
+def transport_angles(board, edges, nonorientable):
+    """Discrete Levi-Civita parallel transport angle theta_{a<-b} per stored
+    edge (a, b): a tangent vector expressed in b's frame is rotated into a's
+    frame along the edge, preserving its angle to the shared edge direction:
+
+        theta_{a<-b} = ang_a(b) + pi - ang_b(a)
+
+    where ang_v(u) is the angle of the projected direction (P[u]-P[v]) in
+    v's tangent frame. Returns (cos, sin) arrays in the canonical (a, b)
+    direction — cos is symmetric, sin antisymmetric (theta_{b<-a} =
+    -theta_{a<-b}). Requires 3D coords + faces (spheres, seed polyhedra);
+    on flat boards this degenerates to theta = 0 and the layer reduces
+    exactly to v2. On non-orientable boards the sin channel is zeroed
+    exactly: w1 obstructs a globally consistent rotation sign (the same
+    obstruction eps represents), so the seam is carried by the
+    reflection-aware eps path instead. Frame choice is a gauge; it is
+    randomized by Bundle.with_gauge during training."""
+    ne = len(edges)
+    ecos, esin = np.ones(ne), np.zeros(ne)
+    coords = getattr(board, "coords", None)
+    faces = getattr(board, "faces", None)
+    if nonorientable or not faces or coords is None or len(coords[0]) < 3:
+        return ecos, esin
+    P = np.asarray(coords, float)
+    n = board.n
+    ctr = P.mean(axis=0)
+    N = np.zeros((n, 3))
+    for fc in faces:
+        fn = np.cross(P[fc[1]] - P[fc[0]], P[fc[2]] - P[fc[0]])
+        nm = np.linalg.norm(fn)
+        if nm < 1e-12:
+            continue
+        fn = fn / nm
+        if np.dot(fn, P[list(fc)].mean(axis=0) - ctr) < 0:
+            fn = -fn                       # align outward (convex-ish seeds)
+        for v in fc:
+            N[v] += fn
+    e1 = np.zeros((n, 3))
+    e2 = np.zeros((n, 3))
+    for v in range(n):
+        nm = np.linalg.norm(N[v])
+        nv = N[v] / nm if nm > 1e-12 else np.array([0.0, 0.0, 1.0])
+        N[v] = nv
+        d = None
+        for u in board.adj[v]:
+            t = P[u] - P[v]
+            t = t - np.dot(t, nv) * nv
+            if np.linalg.norm(t) > 1e-9:
+                d = t
+                break
+        if d is None:
+            d = np.array([1.0, 0.0, 0.0])
+            d = d - np.dot(d, nv) * nv
+        e1[v] = d / np.linalg.norm(d)
+        e2[v] = np.cross(nv, e1[v])
+
+    def ang(v, u):
+        d = P[u] - P[v]
+        return math.atan2(float(np.dot(d, e2[v])), float(np.dot(d, e1[v])))
+
+    for ei, (a, b) in enumerate(edges):
+        th = ang(a, b) + math.pi - ang(b, a)
+        ecos[ei], esin[ei] = math.cos(th), math.sin(th)
+    return ecos, esin
+
+
 def wl_orbits(adj, rounds=8):
     """Orbit partition upper bound via WL color refinement (exact on these
     highly symmetric boards in practice; used for equivariance checks)."""
@@ -255,6 +365,12 @@ class Bundle:
                     eset.add((v, u))
                     self.edges.append((v, u))
         self.ne = len(self.edges)
+        self.eu = np.array([e[0] for e in self.edges], dtype=int)
+        self.ev = np.array([e[1] for e in self.edges], dtype=int)
+        self.eeps = np.array([eps[a][b] for a, b in self.edges], dtype=float)
+        # geometric parallel transport per edge (canonical direction)
+        self.ecos, self.esin = transport_angles(board, self.edges,
+                                                self.nonorientable)
         v_edges = [[] for _ in range(n)]
         for ei, (a, b) in enumerate(self.edges):
             v_edges[a].append(ei)
@@ -286,10 +402,13 @@ class Bundle:
                                chi / max(n, 1)])
 
     def with_gauge(self, rng):
-        """Gauge-transform the cocycle: eps'(u,v) = g(u) eps(u,v) g(v) for a
-        random vertex sign field g. Holonomy (and hence non-orientability) is
-        invariant; the seam moves. Used as training augmentation so the net
-        learns gauge invariance the architecture doesn't yet guarantee."""
+        """Gauge-transform the structure: eps'(u,v) = g(u) eps(u,v) g(v) for
+        a random vertex sign field g (holonomy/w1 invariant, seam moves),
+        and — on boards with nontrivial transport — rotate every tangent
+        frame by a random angle beta_v, so theta'_{a<-b} = theta + beta_a -
+        beta_b (holonomy around every cycle invariant, per-edge angles
+        move). Used as training augmentation so the net learns the gauge
+        invariance the architecture doesn't yet guarantee."""
         import copy as _copy
         g = rng.choice([-1, 1], size=self.n)
         out = _copy.copy(self)
@@ -297,6 +416,13 @@ class Bundle:
                        for u in self.adj[v]} for v in range(self.n)}
         out.Ae = _mean_matrix(self.adj, self.n, self.n,
                               signs=lambda v, u: out.eps[v][u])
+        out.eeps = np.array([out.eps[a][b] for a, b in self.edges],
+                            dtype=float)
+        if np.any(self.esin != 0):
+            beta = rng.uniform(0, 2 * np.pi, size=self.n)
+            db = beta[self.eu] - beta[self.ev]
+            out.ecos = self.ecos * np.cos(db) - self.esin * np.sin(db)
+            out.esin = self.esin * np.cos(db) + self.ecos * np.sin(db)
         return out
 
     # ---- per-position structures -------------------------------------------
@@ -378,6 +504,8 @@ class Bundle:
 # ---------- the network ---------------------------------------------------------
 
 FV, FE, FF, FG = 10, 5, 5, 2
+FPV, FPE = 4, 3          # persistence features per vertex / per edge
+GATE_TAU = 0.1           # soft-gate temperature of the level filtration
 
 
 def cayley(T):
@@ -395,19 +523,160 @@ def cayley_backward(G, A, Q):
     return dA - dA.T
 
 
+def rotagg(Ac, As, H):
+    """Aggregate with per-edge 2x2 rotation blocks on channel pairs:
+    out_even = Ac @ H_even - As @ H_odd, out_odd = As @ H_even + Ac @ H_odd.
+    When theta = 0 (Ac plain aggregation, As = 0) this is exactly A @ H. An
+    odd leftover channel is transported trivially (Ac only)."""
+    D = H.shape[1]
+    De = D - (D % 2)
+    out = np.empty_like(H)
+    He, Ho = H[:, 0:De:2], H[:, 1:De:2]
+    out[:, 0:De:2] = Ac @ He - As @ Ho
+    out[:, 1:De:2] = As @ He + Ac @ Ho
+    if D % 2:
+        out[:, -1] = Ac @ H[:, -1]
+    return out
+
+
+def rotagg_T(Ac, As, G):
+    """Gradient w.r.t. H of rotagg(Ac, As, H), given dL/d(out) = G."""
+    D = G.shape[1]
+    De = D - (D % 2)
+    out = np.empty_like(G)
+    Ge, Go = G[:, 0:De:2], G[:, 1:De:2]
+    out[:, 0:De:2] = Ac.T @ Ge + As.T @ Go
+    out[:, 1:De:2] = -As.T @ Ge + Ac.T @ Go
+    if D % 2:
+        out[:, -1] = Ac.T @ G[:, -1]
+    return out
+
+
+def h0_pairs(bundle, phi):
+    """H0 persistence pairs of the superlevel filtration of the learned
+    co-ownership potential phi on edges (structure: stop-grad; phi's
+    gradient path is its co-ownership supervision).
+
+    Descending Kruskal sweep: vertices enter with their first (highest-phi)
+    incident edge; a component's class is born at its first internal edge
+    and dies (elder rule) when absorbed by an older component. Equal-birth
+    merges kill both sides simultaneously — the pair values coincide, so tie
+    handling stays automorphism-equivariant. Zero-persistence singleton
+    absorptions are diagonal points and are discarded.
+
+    Returns PersV (n x 4): [birth, death, lifetime, essential] of the class
+    each vertex was born into (death of the never-absorbed class is the
+    global phi minimum, flagged essential); and PersE (ne x 3):
+    [tree flag, cycle flag (an H1 birth at phi_e), lifetime of the class
+    this edge killed]."""
+    n, ne = bundle.n, bundle.ne
+    PersV = np.zeros((n, FPV))
+    PersE = np.zeros((ne, FPE))
+    if ne == 0:
+        PersV[:, 3] = 1.0
+        return PersV, PersE
+    # structure is stop-grad, so quantize: symmetric positions produce phi
+    # values equal only to floating-point noise, and exact-tie batching must
+    # see them as equal for the pairing to stay equivariant
+    phif = np.round(np.asarray(phi, float), 9)
+    order = np.argsort(-phif, kind="stable")
+    parent = list(range(n))
+    members = [[v] for v in range(n)]
+    birth = [None] * n          # per-root: phi of the component's first edge
+    vbirth = [None] * n
+    vdeath = [None] * n
+
+    def find(x):
+        while parent[x] != x:
+            parent[x] = parent[parent[x]]
+            x = parent[x]
+        return x
+
+    # equal-phi edges are processed as one simultaneous batch: tie handling
+    # (which arises exactly on symmetric positions of a learned field) then
+    # depends only on values and sets, never on edge indices, keeping the
+    # pairing automorphism-equivariant instead of index-tie-broken
+    i = 0
+    while i < ne:
+        f = float(phif[order[i]])
+        batch = []
+        while i < ne and float(phif[order[i]]) == f:
+            batch.append(int(order[i]))
+            i += 1
+        for ei in batch:                            # vertices entering at f
+            for w in bundle.edges[ei]:
+                if vbirth[w] is None:
+                    vbirth[w] = f
+        pre = {}                                    # tree/cycle w.r.t. the
+        touched = set()                             # pre-batch state
+        for ei in batch:
+            a, b = bundle.edges[ei]
+            ra, rb = find(a), find(b)
+            pre[ei] = (ra, rb)
+            touched.update((ra, rb))
+            PersE[ei, 1 if ra == rb else 0] = 1.0
+        members_pre = {r: list(members[r]) for r in touched}
+        for ei in batch:                            # union the batch
+            ra, rb = find(bundle.edges[ei][0]), find(bundle.edges[ei][1])
+            if ra == rb:
+                continue
+            if len(members[ra]) < len(members[rb]):
+                ra, rb = rb, ra
+            parent[rb] = ra
+            members[ra].extend(members[rb])
+            members[rb] = []
+        groups = {}
+        for r in touched:
+            groups.setdefault(find(r), []).append(r)
+        glife = {}
+        for g, roots in groups.items():
+            births = [birth[r] for r in roots if birth[r] is not None]
+            if not births:                          # all singletons: born now
+                birth[g] = f
+                glife[g] = 0.0
+                continue
+            mx = max(births)
+            elders = [r for r in roots if birth[r] == mx]
+            # elder rule over the merged super-group; a tied elder pair
+            # kills both (values coincide, so ties stay equivariant);
+            # singleton absorptions are zero-persistence diagonal points
+            dying = [r for r in roots if birth[r] is not None
+                     and (birth[r] < mx or len(elders) >= 2)]
+            for r in dying:
+                for w in members_pre[r]:
+                    if vdeath[w] is None:
+                        vdeath[w] = f
+            birth[g] = mx
+            glife[g] = max((birth[r] - f for r in dying), default=0.0)
+        for ei in batch:
+            if PersE[ei, 0]:                        # tree edges carry the
+                PersE[ei, 2] = glife[find(bundle.edges[ei][0])]   # kill
+    pmin = float(phif.min())
+    for v in range(n):
+        bv = vbirth[v] if vbirth[v] is not None else pmin
+        if vdeath[v] is None:
+            PersV[v] = (bv, pmin, bv - pmin, 1.0)
+        else:
+            PersV[v] = (bv, vdeath[v], bv - vdeath[v], 0.0)
+    return PersV, PersE
+
+
 class HATZ:
-    """v2: outcome-supervised filtration levels with per-node attention,
-    ownership-driven Morse-Smale pooling, and Cayley-orthogonal
-    eps-conditioned transport. See module docstring."""
+    """v3: persistence-pair injection, learned quantile filtration levels
+    with Hofer-style soft gates, curriculum masking over levels,
+    Cayley-geometric orthogonal transport, and Morse-flow directed
+    propagation. See module docstring."""
 
-    LEVELS = (0.75, 0.5, None)          # co-ownership thresholds; None = full
-
-    def __init__(self, hidden=32, layers=3, seed=0):
+    K = 5            # filtration levels: two learned quantiles + full graph
+    
+    def __init__(self, hidden=32, layers=5, seed=0):
         rng = np.random.default_rng(seed)
         D = hidden
 
         def init(a, b):
             return rng.standard_normal((a, b)) * np.sqrt(2.0 / a)
+
+        initial_quantiles = np.linspace(0.9, 0.3, self.K - 1)
 
         p = {"Wv_in": init(FV, D), "We_in": init(FE, D), "Wf_in": init(FF, D),
              "Wg_in": init(FG, D),
@@ -420,14 +689,26 @@ class HATZ:
              "Wgin": init(D, D), "bgin": np.zeros(D),
              "eps_gin": np.zeros(1),
              "Wf1": init(2 * D, D), "bf1": np.zeros(D),
-             "wf2": rng.standard_normal(D) * 0.05, "bf2": np.zeros(1)}
+             "wf2": rng.standard_normal(D) * 0.05, "bf2": np.zeros(1),
+             # persistence-pair injection (pairs are stop-grad structure)
+             "Wpv": rng.standard_normal((FPV, D)) * 0.05,
+             "Wpe": rng.standard_normal((FPE, D)) * 0.05,
+             # learned quantile fractions; sigmoid -> (0.75, 0.5) at init,
+             # matching v2's fixed thresholds in spirit but sliding with
+             # the position's phi distribution
+             "qraw": np.log(initial_quantiles / (1.0 - initial_quantiles)),
+             }
+             
         for l in range(layers):
-            p[f"T0{l}"] = rng.standard_normal((D, D)) * 0.05   # Cayley raw
+            # Cayley raw at 0 => W0 = I: the transport *starts* at the
+            # mesh's geometric parallel transporter R(theta) and self-play
+            # deforms it, orthogonality guaranteed throughout
+            p[f"T0{l}"] = np.zeros((D, D))
             p[f"T1{l}"] = rng.standard_normal((D, D)) * 0.05
             for name in ("Ws", "Wev", "Wgl", "Wes", "Wve", "Wfe",
-                         "Wfs", "Wef"):
+                         "Wfs", "Wef", "Wup", "Wdn", "Wlat"):
                 p[f"{name}{l}"] = init(D, D)
-            p[f"a{l}"] = rng.standard_normal((len(self.LEVELS), D)) * 0.05
+            p[f"a{l}"] = rng.standard_normal((self.K, D)) * 0.05
             p[f"bv{l}"] = np.zeros(D)
             p[f"be{l}"] = np.zeros(D)
             p[f"bf{l}"] = np.zeros(D)
@@ -435,29 +716,105 @@ class HATZ:
         self.hidden, self.layers = D, layers
         self.meta = {}
         self._adam = None
+        self.levels_active = None        # curriculum default: all levels
 
     # ---- per-position structure builders ------------------------------------
 
     @staticmethod
-    def _level_mats(bundle, keep):
-        """Row-normalized plain and eps-signed aggregation over the kept edge
-        subset (a boolean per undirected edge). Structure only: no gradient."""
+    def _gated_mats(bundle, ki, gate):
+        """Aggregation matrices over the kept edge subset ki (indices into
+        bundle.edges): plain-cos (Ac), sin (As, antisymmetric — the
+        geometric rotation), and eps-signed (Ae), all row-normalized by the
+        *hard* kept-degree count (structure) and multiplied by the *soft*
+        gate (differentiable)."""
         n = bundle.n
-        A = np.zeros((n, n))
-        Ae = np.zeros((n, n))
+        u, v = bundle.eu[ki], bundle.ev[ki]
         deg = np.zeros(n)
-        for ei, (u, v) in enumerate(bundle.edges):
-            if keep[ei]:
-                deg[u] += 1
-                deg[v] += 1
-        for ei, (u, v) in enumerate(bundle.edges):
-            if keep[ei]:
-                e = bundle.eps[u][v]
-                A[u, v] += 1.0 / deg[u]
-                A[v, u] += 1.0 / deg[v]
-                Ae[u, v] += e / deg[u]
-                Ae[v, u] += e / deg[v]
-        return A, Ae
+        np.add.at(deg, u, 1.0)
+        np.add.at(deg, v, 1.0)
+        dn = np.maximum(deg, 1.0)
+        Ac = np.zeros((n, n))
+        As = np.zeros((n, n))
+        Ae = np.zeros((n, n))
+        c, s, e = bundle.ecos[ki], bundle.esin[ki], bundle.eeps[ki]
+        np.add.at(Ac, (u, v), gate * c / dn[u])
+        np.add.at(Ac, (v, u), gate * c / dn[v])
+        np.add.at(As, (u, v), gate * s / dn[u])
+        np.add.at(As, (v, u), -gate * s / dn[v])
+        np.add.at(Ae, (u, v), gate * e / dn[u])
+        np.add.at(Ae, (v, u), gate * e / dn[v])
+        return Ac, As, Ae, dn
+
+    def _flow_mats(self, bundle, f):
+        """Morse-flow routing matrices from the mid-depth ownership field f:
+        ascending basins via steepest-ascent union-find (<=-persistence
+        merges keep plateau ties equivariant), merged at the 60th-percentile
+        persistence. Per vertex: mean over up-neighbors (same basin, higher
+        f), down-neighbors (same basin, lower f), and lateral neighbors
+        (different basin — a separatrix crossing — or in-basin plateau
+        ties). Structure only: f's gradient path is its own supervision."""
+        n = bundle.n
+        fq = np.round(np.asarray(f, float), 6)
+        # ascending-manifold labels by *reachability* on the
+        # plateau-contracted graph: basin interiors match steepest ascent,
+        # but boundary vertices carry the set of (plateau) maxima their
+        # ascending flows can reach — value/set-defined throughout, so
+        # exactly Aut-equivariant where raw steepest-ascent pointers would
+        # index-tie-break on chiral plateaus. A vertex reaching >= 2 maxima
+        # sits on a separatrix, and its edges route laterally — exactly the
+        # Morse-Smale cell-boundary reading of "where ascending flows
+        # diverge". Persistence simplification of the routing field is
+        # deliberately omitted: equal-persistence family merging cannot be
+        # made index-free (the same chiral-plateau obstruction, one level
+        # up), and over-segmentation only shifts edges into the lateral
+        # channel, which is exactly where contested structure belongs.
+        sup = [-1] * n
+        S = 0
+        for v in range(n):
+            if sup[v] != -1:
+                continue
+            sup[v] = S
+            stack = [v]
+            while stack:
+                x = stack.pop()
+                for u in bundle.adj[x]:
+                    if fq[u] == fq[v] and sup[u] == -1:
+                        sup[u] = S
+                        stack.append(u)
+            S += 1
+        sval = [0.0] * S
+        snbr = [set() for _ in range(S)]
+        for v in range(n):
+            sval[sup[v]] = fq[v]
+            for u in bundle.adj[v]:
+                if sup[u] != sup[v]:
+                    snbr[sup[v]].add(sup[u])
+        reach = [frozenset()] * S
+        for s in sorted(range(S), key=lambda t: -sval[t]):
+            higher = [t for t in snbr[s] if sval[t] > sval[s]]
+            if not higher:                 # a (plateau) maximum seeds itself
+                reach[s] = frozenset([s])
+            else:
+                r = set()
+                for t in higher:
+                    r |= reach[t]
+                reach[s] = frozenset(r)
+        lab = [reach[sup[v]] for v in range(n)]
+        up = [[] for _ in range(n)]
+        dn = [[] for _ in range(n)]
+        lat = [[] for _ in range(n)]
+        for v in range(n):
+            for u in bundle.adj[v]:
+                if lab[u] != lab[v]:
+                    lat[v].append(u)       # separatrix crossing
+                elif fq[u] > fq[v]:
+                    up[v].append(u)
+                elif fq[u] < fq[v]:
+                    dn[v].append(u)
+                else:
+                    lat[v].append(u)       # in-basin plateau: boundary-like
+        return (_mean_matrix(up, n, n), _mean_matrix(dn, n, n),
+                _mean_matrix(lat, n, n))
 
     def _msc_pool(self, bundle, f):
         """Filtration pooling of the mid-network ownership field: vertices
@@ -500,29 +857,48 @@ class HATZ:
         Ar = _mean_matrix([sorted(x) for x in radj], R, R)
         return S, P, Ar
 
+    def freeze_struct(self, C):
+        """Snapshot every stop-grad structural choice of a forward pass, so
+        the gradient check (and tree reuse) can re-run the differentiable
+        parts without crossing partition/keep/pairing flips."""
+        return {"struct": {"qord": C["qord"],
+                           "qi": [(lv.get("i0"), lv.get("i1"))
+                                  for lv in C["levels"]],
+                           "keeps": [lv["ki"] for lv in C["levels"]]},
+                "msc": (C["msc"]["S"], C["msc"]["P"], C["msc"]["Ar"]),
+                "flow": C["flow"],
+                "pers": (C["PersV"], C["PersE"])}
+
     # ---- forward -------------------------------------------------------------
 
-    def forward(self, bundle, stones, to_move, mask, frozen=None):
-        """frozen: optional {"mats": ..., "msc": (S, P, Ar)} to reuse
-        position structure — used by the gradient check (structure is
-        stop-grad, so finite differences must not cross partition flips)
-        and available for tree reuse."""
-        p, D, L = self.p, self.hidden, self.layers
+    def forward(self, bundle, stones, to_move, mask, frozen=None,
+                levels_active=None):
+        """frozen: optional output of freeze_struct() to reuse position
+        structure (keeps, quantile order statistics, basins, msc partition,
+        persistence pairing). levels_active: curriculum masking — attention
+        mixes only the first levels_active levels (most homophilous first);
+        None uses self.levels_active, which defaults to all."""
+        p, D, L, K = self.p, self.hidden, self.layers, self.K
+        if levels_active is None:
+            levels_active = self.levels_active
+        act = K if levels_active is None else max(1, min(K,
+                                                         int(levels_active)))
         Xv, Xe, Xf = bundle.features(stones, to_move)
-        n = bundle.n
+        n, ne = bundle.n, bundle.ne
         C = {"b": bundle, "Xv": Xv, "Xe": Xe, "Xf": Xf,
-             "mask": np.asarray(mask, float)}
+             "mask": np.asarray(mask, float), "act": act}
         g_in = np.tile(bundle.gfeat, (1, 1))
-        Hv = np.maximum(Xv @ p["Wv_in"] + (g_in @ p["Wg_in"]), 0)
-        He = np.maximum(Xe @ p["We_in"], 0)
+        Hv0 = np.maximum(Xv @ p["Wv_in"] + (g_in @ p["Wg_in"]), 0)
+        He0 = np.maximum(Xe @ p["We_in"], 0)
         Hf = np.maximum(Xf @ p["Wf_in"], 0) if Xf is not None else None
-        C["Hv0"], C["He0"], C["Hf0"] = Hv, He, Hf
+        C["Hv0"], C["He0"], C["Hf0"] = Hv0, He0, Hf
 
-        # GIN-eps co-ownership edge filter (Leventhal 2025; Hofer et al. 2020)
-        Zg = ((1 + p["eps_gin"][0]) * Hv + bundle.Asum @ Hv) @ p["Wgin"]             + p["bgin"]
+        # GIN-eps co-ownership edge filter on the pre-injection embedding
+        # (Leventhal 2025; Hofer et al. 2020)
+        Zg = ((1 + p["eps_gin"][0]) * Hv0 + bundle.Asum @ Hv0) @ p["Wgin"] \
+            + p["bgin"]
         Gh = np.maximum(Zg, 0)
-        eu = np.array([e[0] for e in bundle.edges])
-        ev = np.array([e[1] for e in bundle.edges])
+        eu, ev = bundle.eu, bundle.ev
         xsum = Gh[eu] + Gh[ev]
         xdif = Gh[eu] - Gh[ev]
         Xef = np.concatenate([xsum, np.abs(xdif)], axis=1)
@@ -533,31 +909,95 @@ class HATZ:
         C.update(Zg=Zg, Gh=Gh, eu=eu, ev=ev, xdif=xdif, Zf1=Zf1, Hf1=Hf1,
                  tlog=tlog, phi=phi)
 
-        # filtration levels over the filter values (structure: stop-grad)
-        mats = []
-        for th in self.LEVELS:
-            keep = np.ones(len(bundle.edges), bool) if th is None                 else (phi >= th)
-            mats.append(self._level_mats(bundle, keep))
-        C["mats"] = mats
+        # persistence pairs of the phi-filtration (structure: stop-grad),
+        # injected additively so the hierarchy carries every connection's
+        # topological lifetime, not just its level membership
+        if frozen is not None and "pers" in frozen:
+            PersV, PersE = frozen["pers"]
+        else:
+            PersV, PersE = h0_pairs(bundle, phi)
+        C["PersV"], C["PersE"] = PersV, PersE
+        Hv = Hv0 + PersV @ p["Wpv"]
+        He = He0 + PersE @ p["Wpe"]
+
+        # learned quantile thresholds (Hofer-style differentiable
+        # filtration): hard keeps are structure (stop-grad, hard-count row
+        # normalization); a soft gate sigma((phi - p_l)/tau) multiplies each
+        # kept edge, carrying gradient to phi, to the thresholds p_l, and
+        # through the interpolated empirical quantile to the learned
+        # fractions qraw — so the levels slide to track the position's
+        # contact structure.
+        st = frozen["struct"] if frozen is not None and "struct" in frozen \
+            else None
+        # structural decisions (ordering, keeps) use quantized phi so exact
+        # ties on symmetric positions stay ties; gates and thresholds stay
+        # live on the unquantized values
+        phir = np.round(phi, 9)
+        qord = st["qord"] if st is not None else (
+            np.argsort(phir, kind="stable") if ne else np.array([], int))
+        levels, pl = [], []
+        for i in range(act):
+            if i == K - 1 or ne < 2:
+                ki = st["keeps"][i] if st is not None else np.arange(ne)
+                lv = {"ki": ki, "gate": np.ones(len(ki)), "p": None}
+            else:
+                q = 1.0 / (1.0 + math.exp(-p["qraw"][i]))
+                pos = q * (ne - 1)
+                if st is not None:
+                    i0, i1 = st["qi"][i]
+                    ki = st["keeps"][i]
+                else:
+                    i0 = min(int(pos), ne - 2)
+                    i1 = i0 + 1
+                    ki = None
+                w = pos - i0
+                j0, j1 = qord[i0], qord[i1]
+                pv = (1 - w) * phi[j0] + w * phi[j1]
+                if ki is None:
+                    pvq = np.round((1 - w) * phir[j0] + w * phir[j1], 9)
+                    ki = np.where(phir >= pvq)[0]
+                gate = 1.0 / (1.0 + np.exp(-(phi[ki] - pv) / GATE_TAU))
+                lv = {"ki": ki, "gate": gate, "p": float(pv), "i0": i0,
+                      "i1": i1, "w": w, "q": q}
+                pl.append(float(pv))
+            Ac, As, Ae, dn = self._gated_mats(bundle, lv["ki"], lv["gate"])
+            lv.update(Ac=Ac, As=As, Ae=Ae, dn=dn)
+            levels.append(lv)
+        C["levels"], C["pl"], C["qord"] = levels, pl, qord
 
         C["Ls"] = []
         C["msc"] = None
+        C["flow"] = frozen["flow"] if frozen is not None and "flow" in frozen \
+            else None
         for l in range(L):
             W0, A0c, Q0 = cayley(p[f"T0{l}"])
             W1, A1c, Q1 = cayley(p[f"T1{l}"])
             gmean = Hv.mean(axis=0, keepdims=True)
-            ms, ss, als = [], [], None
-            for (Al, Ael) in mats:
-                ms.append((Al @ Hv) @ W0 + (Ael @ Hv) @ W1)
+            ms, Rots, AeHs = [], [], []
+            for lv in levels:
+                Rot = rotagg(lv["Ac"], lv["As"], Hv)
+                AeH = lv["Ae"] @ Hv
+                ms.append(Rot @ W0 + AeH @ W1)
+                Rots.append(Rot)
+                AeHs.append(AeH)
             a = p[f"a{l}"]
             S_att = np.stack([m @ a[i] for i, m in enumerate(ms)], axis=1)
             S_att = S_att - S_att.max(axis=1, keepdims=True)
             expS = np.exp(S_att)
-            alpha = expS / expS.sum(axis=1, keepdims=True)      # (n, P)
+            alpha = expS / expS.sum(axis=1, keepdims=True)      # (n, act)
             M = sum(alpha[:, i:i + 1] * ms[i] for i in range(len(ms)))
             EH = bundle.M_ev @ He
             Zv = (Hv @ p[f"Ws{l}"] + M + EH @ p[f"Wev{l}"]
                   + gmean @ p[f"Wgl{l}"] + p[f"bv{l}"])
+            UH = DH = XH = None
+            if l >= 1 and C["flow"] is not None:
+                # Morse-flow directed propagation: route messages along the
+                # ownership field's ascending/descending manifolds, with the
+                # separatrix channel carrying contested boundaries
+                Aup, Adn, Alat = C["flow"]
+                UH, DH, XH = Aup @ Hv, Adn @ Hv, Alat @ Hv
+                Zv = (Zv + UH @ p[f"Wup{l}"] + DH @ p[f"Wdn{l}"]
+                      + XH @ p[f"Wlat{l}"])
             VH = bundle.M_ve @ Hv
             Ze = He @ p[f"Wes{l}"] + VH @ p[f"Wve{l}"] + p[f"be{l}"]
             FHe = EHf = Zf = None
@@ -569,14 +1009,16 @@ class HATZ:
             C["Ls"].append({"Hv": Hv, "He": He, "Hf": Hf, "ms": ms,
                             "alpha": alpha, "M": M, "EH": EH, "VH": VH,
                             "gmean": gmean, "Zv": Zv, "Ze": Ze, "FHe": FHe,
-                            "EHf": EHf, "Zf": Zf,
+                            "EHf": EHf, "Zf": Zf, "Rots": Rots, "AeHs": AeHs,
+                            "UH": UH, "DH": DH, "XH": XH,
                             "W0": W0, "A0c": A0c, "Q0": Q0,
                             "W1": W1, "A1c": A1c, "Q1": Q1})
             Hv, He = np.maximum(Zv, 0), np.maximum(Ze, 0)
             Hf = np.maximum(Zf, 0) if Zf is not None else None
             if l == 0:
-                # ownership at mid-depth: supervised, and the Morse function
-                # whose basins define the pooling regions
+                # ownership at mid-depth: supervised, the Morse function
+                # whose interlevel components define the pooling regions,
+                # and the flow field that routes propagation above
                 uo = Hv @ p["wo"] + p["bo"][0]
                 own_mid = np.tanh(uo)
                 if frozen is not None:
@@ -589,6 +1031,8 @@ class HATZ:
                 Hv = Hv + (S @ Rh) @ p["Wu"]
                 C["msc"] = {"S": S, "P": Pp, "Ar": Ar, "PH": PH, "Zr": Zr,
                             "Rh": Rh, "own_mid": own_mid, "uo": uo}
+                if C["flow"] is None:
+                    C["flow"] = self._flow_mats(bundle, own_mid)
 
         C["Hv"], C["He"], C["Hf"] = Hv, He, Hf
         gv = Hv.mean(axis=0)
@@ -610,13 +1054,41 @@ class HATZ:
 
     # ---- backward ------------------------------------------------------------
 
+    @staticmethod
+    def _gate_grad(bundle, lv, Hv, dRot, G1):
+        """dL/d(gate_e) for every kept edge of a level, given dL/dRot and
+        G1 = dm @ W1.T at one layer. Vectorized over the kept edges: the
+        rotation blocks R(c, s) into u and R(c, -s) into v, each scaled by
+        1/deg, plus the eps path."""
+        ki = lv["ki"]
+        u, v = bundle.eu[ki], bundle.ev[ki]
+        c, s, e = bundle.ecos[ki], bundle.esin[ki], bundle.eeps[ki]
+        dn = lv["dn"]
+        D = Hv.shape[1]
+        De = D - (D % 2)
+        Hve, Hvo = Hv[:, 0:De:2], Hv[:, 1:De:2]
+        dRe, dRo = dRot[:, 0:De:2], dRot[:, 1:De:2]
+        Rvb_e = c[:, None] * Hve[v] - s[:, None] * Hvo[v]
+        Rvb_o = s[:, None] * Hve[v] + c[:, None] * Hvo[v]
+        dot_a = (dRe[u] * Rvb_e).sum(1) + (dRo[u] * Rvb_o).sum(1)
+        Rua_e = c[:, None] * Hve[u] + s[:, None] * Hvo[u]
+        Rua_o = -s[:, None] * Hve[u] + c[:, None] * Hvo[u]
+        dot_b = (dRe[v] * Rua_e).sum(1) + (dRo[v] * Rua_o).sum(1)
+        if D % 2:
+            dot_a += c * dRot[u, -1] * Hv[v, -1]
+            dot_b += c * dRot[v, -1] * Hv[u, -1]
+        return (dot_a / dn[u] + dot_b / dn[v]
+                + e * ((G1[u] * Hv[v]).sum(1) / dn[u]
+                       + (G1[v] * Hv[u]).sum(1) / dn[v]))
+
     def backward(self, C, pi, z_t, own_t, grads, eown_t=None,
                  vw=1.0, ow=0.5, mw=0.25, fw=0.25):
         p, b = self.p, C["b"]
-        n = b.n
+        n, ne = b.n, b.ne
         probs, value, own, Hv, gv = (C["probs"], C["value"], C["own"],
                                      C["Hv"], C["gv"])
-        loss = -float(np.sum(pi * np.log(probs + 1e-12)))             + vw * (z_t - value) ** 2
+        loss = -float(np.sum(pi * np.log(probs + 1e-12))) \
+            + vw * (z_t - value) ** 2
         dlog = probs - pi
         dHv = np.outer(dlog[:n], p["wp"])
         grads["wp"] += Hv.T @ dlog[:n]
@@ -636,27 +1108,12 @@ class HATZ:
             grads["bo"][0] += do.sum()
         dHv = dHv + dgv[None, :] / n
 
-        # edge co-ownership filter supervision (gradient reaches the filter
-        # head here; the level masks themselves are stop-grad structure)
-        dGh = np.zeros_like(C["Gh"])
-        if eown_t is not None and len(C["phi"]):
-            ne = len(C["phi"])
-            loss += fw * float(np.mean(
-                -eown_t * np.log(C["phi"] + 1e-12)
-                - (1 - eown_t) * np.log(1 - C["phi"] + 1e-12)))
-            dt = fw * (C["phi"] - eown_t) / ne
-            grads["wf2"] += C["Hf1"].T @ dt
-            grads["bf2"][0] += dt.sum()
-            dHf1 = np.outer(dt, p["wf2"]) * (C["Zf1"] > 0)
-            grads["Wf1"] += np.concatenate(
-                [C["Gh"][C["eu"]] + C["Gh"][C["ev"]],
-                 np.abs(C["xdif"])], axis=1).T @ dHf1
-            grads["bf1"] += dHf1.sum(axis=0)
-            dXef = dHf1 @ p["Wf1"].T
-            D = self.hidden
-            dsum, ddif = dXef[:, :D], dXef[:, D:] * np.sign(C["xdif"])
-            np.add.at(dGh, C["eu"], dsum + ddif)
-            np.add.at(dGh, C["ev"], dsum - ddif)
+        # gate/quantile gradients into phi accumulate across the layer loop;
+        # the edge-filter head chain runs after it, combining them with the
+        # co-ownership supervision term
+        dphi = np.zeros(ne)
+        dp_acc = np.zeros(max(self.K - 1, 1))
+        levels = C["levels"]
 
         L = self.layers
         dHe = np.zeros_like(C["He"])
@@ -695,21 +1152,35 @@ class HATZ:
             a = p[f"a{l}"]
             GM = dZv
             gm_dot_M = (GM * M).sum(axis=1)
-            dW0 = np.zeros_like(Lc["W0"])
-            dW1 = np.zeros_like(Lc["W1"])
+            dW0 = np.zeros((self.hidden, self.hidden))
+            dW1 = np.zeros((self.hidden, self.hidden))
             dHv_new = (dZv @ p[f"Ws{l}"].T
                        + b.M_ve.T @ (dZe @ p[f"Wve{l}"].T)
                        + np.ones((n, 1)) @ ((dZv @ p[f"Wgl{l}"].T)
                                             .sum(axis=0, keepdims=True)) / n)
-            for i, (Al, Ael) in enumerate(C["mats"]):
+            if l >= 1 and Lc["UH"] is not None:
+                Aup, Adn, Alat = C["flow"]
+                grads[f"Wup{l}"] += Lc["UH"].T @ dZv
+                grads[f"Wdn{l}"] += Lc["DH"].T @ dZv
+                grads[f"Wlat{l}"] += Lc["XH"].T @ dZv
+                dHv_new += (Aup.T @ (dZv @ p[f"Wup{l}"].T)
+                            + Adn.T @ (dZv @ p[f"Wdn{l}"].T)
+                            + Alat.T @ (dZv @ p[f"Wlat{l}"].T))
+            for i, lv in enumerate(levels):
                 ds = alpha[:, i] * ((GM * ms[i]).sum(axis=1) - gm_dot_M)
                 dm = alpha[:, i:i + 1] * GM + np.outer(ds, a[i])
                 grads[f"a{l}"][i] += ms[i].T @ ds
-                AH = Al @ Lc["Hv"]
-                AeH = Ael @ Lc["Hv"]
-                dW0 += AH.T @ dm
-                dW1 += AeH.T @ dm
-                dHv_new += Al.T @ (dm @ Lc["W0"].T)                     + Ael.T @ (dm @ Lc["W1"].T)
+                dW0 += Lc["Rots"][i].T @ dm
+                dW1 += Lc["AeHs"][i].T @ dm
+                dRot = dm @ Lc["W0"].T
+                G1 = dm @ Lc["W1"].T
+                dHv_new += rotagg_T(lv["Ac"], lv["As"], dRot) \
+                    + lv["Ae"].T @ G1
+                if lv["p"] is not None and len(lv["ki"]):
+                    dg = self._gate_grad(b, lv, Lc["Hv"], dRot, G1)
+                    contrib = dg * lv["gate"] * (1 - lv["gate"]) / GATE_TAU
+                    dphi[lv["ki"]] += contrib
+                    dp_acc[i] -= contrib.sum()
             grads[f"T0{l}"] += cayley_backward(dW0, Lc["A0c"], Lc["Q0"])
             grads[f"T1{l}"] += cayley_backward(dW1, Lc["A1c"], Lc["Q1"])
 
@@ -723,6 +1194,48 @@ class HATZ:
                 dHf = dZf @ p[f"Wfs{l}"].T + b.M_fe.T @ (dZe @ p[f"Wfe{l}"].T)
                 dHe_new = dHe_new + b.M_ef.T @ (dZf @ p[f"Wef{l}"].T)
             dHv, dHe = dHv_new, dHe_new
+
+        # learned quantile thresholds backward:
+        # p_i = (1 - w) phi[j0] + w phi[j1], w = sigmoid(qraw_i)(ne-1) - i0
+        for i, lv in enumerate(levels):
+            if lv.get("p") is None or "q" not in lv or dp_acc[i] == 0:
+                continue
+            j0, j1 = C["qord"][lv["i0"]], C["qord"][lv["i1"]]
+            dphi[j0] += dp_acc[i] * (1 - lv["w"])
+            dphi[j1] += dp_acc[i] * lv["w"]
+            q = lv["q"]
+            grads["qraw"][i] += (dp_acc[i] * (C["phi"][j1] - C["phi"][j0])
+                                 * (ne - 1) * q * (1 - q))
+
+        # edge co-ownership filter head: the supervision term (gradient
+        # reaches the filter head here) combines with the differentiable
+        # filtration gradients; keeps/pairings themselves are stop-grad
+        # structure
+        dGh = np.zeros_like(C["Gh"])
+        dtlog = np.zeros(ne)
+        if eown_t is not None and ne:
+            loss += fw * float(np.mean(
+                -eown_t * np.log(C["phi"] + 1e-12)
+                - (1 - eown_t) * np.log(1 - C["phi"] + 1e-12)))
+            dtlog += fw * (C["phi"] - eown_t) / ne
+        dtlog += dphi * C["phi"] * (1 - C["phi"])
+        if ne and np.any(dtlog):
+            grads["wf2"] += C["Hf1"].T @ dtlog
+            grads["bf2"][0] += dtlog.sum()
+            dHf1 = np.outer(dtlog, p["wf2"]) * (C["Zf1"] > 0)
+            grads["Wf1"] += np.concatenate(
+                [C["Gh"][C["eu"]] + C["Gh"][C["ev"]],
+                 np.abs(C["xdif"])], axis=1).T @ dHf1
+            grads["bf1"] += dHf1.sum(axis=0)
+            dXef = dHf1 @ p["Wf1"].T
+            D = self.hidden
+            dsum, ddif = dXef[:, :D], dXef[:, D:] * np.sign(C["xdif"])
+            np.add.at(dGh, C["eu"], dsum + ddif)
+            np.add.at(dGh, C["ev"], dsum - ddif)
+
+        # persistence injection weights (pairs are stop-grad structure)
+        grads["Wpv"] += C["PersV"].T @ dHv
+        grads["Wpe"] += C["PersE"].T @ dHe
 
         # GIN filter head backward into the input embedding
         if np.any(dGh):
@@ -773,8 +1286,14 @@ class HATZ:
         d = np.load(path, allow_pickle=False)
         meta = json.loads(str(d["__meta__"]))
         net = cls(hidden=meta["hidden"], layers=meta["layers"])
+        missing = [k for k in net.p if k not in d.files]
         for k in net.p:
-            net.p[k] = d[k]
+            if k in d.files:
+                net.p[k] = d[k]
+        if missing:
+            print(f"hatz.load: {path} predates v3; keeping fresh init for "
+                  f"{len(missing)} new parameter(s): {sorted(missing)[:6]}"
+                  + ("..." if len(missing) > 6 else ""))
         net.meta = {k: v for k, v in meta.items()
                     if k not in ("hidden", "layers")}
         return net

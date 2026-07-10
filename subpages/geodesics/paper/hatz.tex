@@ -37,26 +37,42 @@ architecture plays it optimally. We present a first implementation of a
 self-play agent whose network (i) carries the reflection ($\ZZ_2$) part of
 the gauge structure that non-orientable surfaces provably require, via an
 orientation cocycle computed from the board's combinatorics and
-orthogonal (Cayley-parameterized) sheaf-style transport maps conditioned
-on it; (ii) is exactly equivariant
-to each board's automorphism group by construction, replacing the dihedral
+orthogonal (Cayley-parameterized) copresheaf transport maps conditioned
+on it --- \emph{initialized at the mesh's geometric parallel
+transporter}, so the layer starts as a gauge convolution and self-play
+deforms it while orthogonality is guaranteed; (ii) is exactly equivariant
+to each board's automorphism group by construction on flat boards,
+replacing the dihedral
 data augmentation that has no analogue off the square grid; (iii) pools through interlevel-set components of its \emph{own predicted
 ownership field} --- a learned Morse function whose partition is shaped by
-supervision rather than differentiable relaxation; (iv) laterally
+supervision rather than differentiable relaxation --- and \emph{routes}
+message passing along that field's ascending manifolds, with a dedicated
+separatrix channel carrying the contested boundaries where Go fights
+live; (iv) laterally
 decomposes each position through an outcome-supervised edge filtration
-(a GIN-$\eps$ head predicting endpoint co-ownership) with per-node
-attention across filtration levels; and (v) reads
+(a GIN-$\eps$ head predicting endpoint co-ownership) whose thresholds sit
+at \emph{learned quantiles} of the current filter distribution
+(Hofer-style differentiable filtration: hard keeps are structure, soft
+gates carry gradient), with per-node
+attention across filtration levels, a successive-training curriculum over
+those levels, and the $H_0$ persistence pairs of the filtration injected
+as auxiliary inputs so the hierarchy carries every connection's
+topological lifetime; and (v) reads
 the board as a cell complex, passing messages over vertex--edge--face
 incidences with curvature and localized-homology inputs and an ownership
-auxiliary head. The network is small ($3.5\times 10^4$ parameters),
+auxiliary head. The network is small ($4.8\times 10^4$ parameters),
 dependency-free, and every gradient is hand-derived and numerically
 verified. We verify the orientation cocycle against ground-truth
 orientability on eleven board types, demonstrate machine-precision
-equivariance, and report three pathologies specific to this setting --- transposition-table
+equivariance on flat boards, and report the pathologies specific to this
+setting --- transposition-table
 ko cycles, a degenerate early-pass equilibrium under Tromp--Taylor
 scoring, and the failure of index-based tie-breaking (simulation of
 simplicity) to respect board symmetries when the Morse function is
-learned --- together with their remedies. To
+learned, an obstruction we show recurs at every level of the hierarchy
+(basins, persistence pairing, family merging) and resolve with
+value-and-set-defined constructions throughout --- together with their
+remedies. To
 our knowledge this is the first game-playing agent on non-orientable
 boards; a full transfer and ablation study is specified and in progress.
 \end{abstract}
@@ -254,43 +270,77 @@ eleven board types in our suite (including hexagonal-mesh M\"obius bands
 and 3D lattices), with seam counts matching the gluing combinatorics
 (Table above).
 
-\subsection{$\eps$-conditioned sheaf transport}
+\subsection{Cayley-geometric copresheaf transport}
+\label{sec:transport}
 Let $h_v\in\mathbb{R}^D$ be vertex features. Messages pass through
-restriction maps conditioned on the cocycle,
+restriction maps conditioned on the cocycle and composed with the mesh's
+own parallel transporter,
 \begin{equation}
-m_v \;=\; \tfrac{1}{|N(v)|}\!\!\sum_{u\in N(v)}\!\big(W_0 +
-\eps(u,v)\,W_1\big)\,h_u
-\;=\; \big((A h)\,W_0\big)_v \;+\; \big((A_\eps h)\,W_1\big)_v,
+m_v \;=\; \tfrac{1}{|N(v)|}\!\!\sum_{u\in N(v)}\!\Big(W_0\,
+R\big(\theta_{v\leftarrow u}\big) + \eps(u,v)\,W_1\Big)\,h_u,
 \qquad W_0, W_1 \in O(D),
 \label{eq:transport}
 \end{equation}
-with orthogonality enforced by the Cayley parameterization
+where $\theta_{v\leftarrow u}$ is the discrete Levi--Civita transport
+angle along the edge (computed from tangent frames on boards with an
+embedded mesh; identically $0$ on flat boards) acting as $2{\times}2$
+rotation blocks on channel pairs, and orthogonality of the learned maps
+is enforced by the Cayley parameterization
 $W = (I-\Lambda)(I+\Lambda)^{-1}$, $\Lambda = T - T^\top$ for a raw
 parameter $T$ (backward pass derived in closed form and verified
-numerically). Orthogonal restriction maps make the transport
-norm-preserving --- genuine discrete parallel transport rather than
-arbitrary mixing --- tightening the correspondence with connection
-sheaves.
-where $A$ is the row-normalized adjacency and $A_\eps$ its
-$\eps$-signed counterpart. Crossing the orientation seam therefore
-applies a different learned map --- the mechanism by which neural sheaf
-diffusion~\cite{bodnar2022sheaf} encodes orientation reversal and
-heterophily --- but with $W_0,W_1$ \emph{shared globally} rather than
-learned per edge, so the same parameters transfer across boards, and
-because $\eps$ enters linearly the layer reduces to two fixed
-aggregation matrices and remains trivially differentiable by hand.
+numerically). Because both $\eps$ and $(\cos\theta,\sin\theta)$ enter
+linearly, the layer still reduces to fixed aggregation matrices --- a
+plain-cosine matrix, an antisymmetric sine matrix, and the $\eps$-signed
+matrix --- and remains trivially differentiable by hand. Crossing the
+orientation seam applies a different learned map --- the mechanism by
+which neural sheaf diffusion~\cite{bodnar2022sheaf} encodes orientation
+reversal and heterophily --- but with $W_0,W_1$ \emph{shared globally}
+rather than learned per edge, so the same parameters transfer across
+boards. On non-orientable boards the sine channel is zeroed
+\emph{exactly}: $w_1$ obstructs a globally consistent rotation sign, and
+the seam crossing is carried by the reflection-aware $\eps$ path instead
+--- the obstruction is represented, not papered over.
 
-\textbf{Honest scope.} This is the discrete reflection part of the $O(2)$
-structure non-orientability mandates~\cite{weiler2021coordinate}; the
-continuous $SO(2)$ part (anisotropic kernels with rotational transport
-over the mesh's rotation system) is future work, and our aggregation is
-isotropic. Further, the network consumes $\eps$ in a fixed canonical
-gauge; holonomy-derived inputs are gauge-invariant, but the learned
-transport is gauge-covariant only up to reparameterization. We therefore
-train with \emph{gauge augmentation}: each self-play game and each
-optimization step resamples $g$ uniformly and uses
-$\eps'(u,v)=g(u)\eps(u,v)g(v)$, teaching the invariance the architecture
-does not yet guarantee.
+\begin{remark}[Copresheaf transport versus gauge convolution]
+\label{rem:copresheaf}
+Two literatures offer transport on surfaces. \emph{Copresheaf/sheaf
+message passing}~\cite{bodnar2022sheaf} attaches a learned linear map to
+every (directed) edge: maximally flexible --- the maps can discover
+tactically meaningful directions from data --- but per-edge parameters do
+not transfer across boards, nothing constrains the maps to preserve
+feature geometry, and on heterophilic graphs unconstrained maps are known
+to help precisely because they can do \emph{anything}. \emph{Gauge-equivariant
+convolution}~\cite{cohen2019gauge,dehaan2021gem,weiler2021coordinate}
+fixes the transport to the mesh's geometric parallel transporter: exactly
+norm-preserving, exactly determined by the geometry, zero parameters ---
+but also zero capacity to learn that influence in Go propagates
+differently along a contested wall than across open territory.
+Eq.~\ref{eq:transport} is genuinely between the two. The raw Cayley
+parameter is initialized at $T=0$, so $W_0 = I$ and the layer \emph{starts
+as the gauge convolution's geometric transporter} $R(\theta)$; self-play
+then deforms $W_0$ away from the identity --- a learned, globally shared
+correction that can encode game-specific transport --- while the Cayley
+map keeps every intermediate point exactly orthogonal, preserving the
+gauge convolution's key virtue (norm preservation, hence genuine discrete
+parallel transport rather than arbitrary mixing) at every step of
+training. Geometric prior, learned correction, orthogonality guaranteed.
+\end{remark}
+
+\textbf{Honest scope.} The $\eps$ path is the discrete reflection part of
+the $O(2)$ structure non-orientability
+mandates~\cite{weiler2021coordinate}; the rotational part is now
+initialized from the mesh geometry on embedded boards but the
+\emph{kernel} remains isotropic (full $SO(2)$ steerability is future
+work). The network consumes $\eps$ and the tangent frames in a fixed
+canonical gauge; holonomy-derived inputs are gauge-invariant, but the
+learned transport is gauge-covariant only up to reparameterization. We
+therefore train with \emph{gauge augmentation} on both structures: each
+self-play game and each optimization step resamples a vertex sign field
+$g$ and uses $\eps'(u,v)=g(u)\eps(u,v)g(v)$, and, on boards with
+nontrivial transport, resamples per-vertex frame rotations $\beta$ and
+uses $\theta' = \theta + \beta_v - \beta_u$ --- both leave holonomy (the
+gauge-invariant content) untouched while teaching the invariance the
+architecture does not yet guarantee.
 
 \subsection{Outcome-supervised filtration levels}
 \label{sec:filtration}
@@ -303,19 +353,61 @@ embedding produces a symmetric per-edge filter
 $\phi(u,v)=\sigma(\mathrm{MLP}[g_u{+}g_v;\,|g_u{-}g_v|])$ supervised by
 \emph{co-ownership}: whether the endpoints are owned by the same player
 under final Tromp--Taylor scoring (targets $1$ / $0$ / $0.5$ for
-same/opposite/neutral). Fixed thresholds $(0.75, 0.5, \text{full})$ give
-nested edge subsets --- predicted chain cores through the contested full
-graph. The transport of Eq.~\ref{eq:transport} runs \emph{per level}
-(the twisted aggregation matrices simply restrict to each kept edge set,
-so gauge structure and equivariance are untouched), and levels combine by
-per-node attention
+same/opposite/neutral).
+
+\textbf{Learned quantile thresholds.} v2 used fixed thresholds
+$(0.75, 0.5, \text{full})$. But heterophily is not stationary within a
+game: early positions have few contact edges and a tight $\phi$
+distribution, while a midgame contact fight spreads $\phi$ wide. Level
+$\ell$ therefore keeps edges with $\phi \ge p_\ell$ where $p_\ell$ is the
+\emph{interpolated empirical quantile} of the current position's $\phi$
+distribution at a learned fraction $\sigma(q_\ell)$ (initialized to
+$0.75$ and $0.5$), so the levels slide to track the actual contact
+structure: early game, levels cluster near the full graph; in a fight,
+they separate to isolate it. Differentiability follows the split
+introduced by Hofer et al.~\cite{hofer2020}: the hard keep set and its
+hard-count row normalization are structure (stop-grad), while a soft gate
+$\sigma\!\big((\phi_e - p_\ell)/\tau\big)$ multiplies each kept edge's
+aggregation weight, carrying gradient to $\phi_e$, to the threshold
+$p_\ell$, and --- through the two bracketing order statistics of the
+interpolated quantile --- to the sorted $\phi$ values and the learned
+fractions $q_\ell$. No relaxation of the combinatorics is needed.
+The transport of Eq.~\ref{eq:transport} runs \emph{per level}
+(the twisted aggregation matrices simply restrict to each kept, gated
+edge set, so gauge structure and equivariance are untouched), and levels
+combine by per-node attention
 $h_v = \sum_\ell \alpha_{v,\ell}\, m^{(\ell)}_v$,
 $\alpha_{v}=\mathrm{softmax}_\ell(m^{(\ell)}_v \cdot a_\ell)$,
 generalizing the filtration attention of~\cite{leventhal2025filtration}.
-Gradients reach the filter through its supervision and through the
-attention weights --- always differentiable --- while the level masks
-themselves are combinatorial structure: supervised, not relaxed, which
+Gradients reach the filter through its supervision, through the
+attention weights, and through the soft gates --- always differentiable
+--- while the level masks themselves are combinatorial structure:
+supervised, not relaxed, which
 sidesteps the piecewise-constant-membership problem entirely.
+
+\subsection{Persistence-pair injection}
+\label{sec:persistence}
+The levels of Sec.~\ref{sec:filtration} sample the $\phi$-filtration at a
+few learned heights; the filtration's $H_0$ \emph{persistence diagram}
+carries strictly more --- the topological lifetime of every connection.
+A descending Kruskal sweep over $\phi$ computes, per vertex, the (birth,
+death, lifetime, essential) of the superlevel component it was born into
+(birth: the vertex's first incident edge; death: absorption of its
+component by an elder one under the elder rule), and, per edge, its
+pairing role: a tree edge that killed a class (annotated with the
+lifetime it terminated) or a cycle edge whose $\phi$ is an $H_1$ birth.
+These features are injected additively into the vertex and edge
+embeddings through learned maps, so the hierarchy carries not just level
+membership but every connection's lifetime --- a stone whose chain
+connection dies late under co-ownership is structurally different from
+one severed early, and the network now sees the difference. Pairing and
+values are structure (stop-grad); $\phi$'s gradient path remains its
+co-ownership supervision. Tie handling matters here too
+(Sec.~\ref{sec:equivariance}): equal-$\phi$ edges are processed as
+simultaneous batches and equal-birth merges kill both sides, so the
+pairing depends only on values and sets, never on indices, and remains
+exactly automorphism-equivariant on the symmetric positions where a
+learned field produces exact ties.
 
 \subsection{Cell ranks and inputs}
 \label{sec:net}
@@ -341,16 +433,20 @@ Heads: a per-vertex policy logit plus a pooled pass logit; a pooled
 $\tanh$ value; and a per-vertex $\tanh$ \emph{ownership} head supervised
 by final Tromp--Taylor territory, KataGo's auxiliary target adapted to
 graphs. The ownership head is applied twice with shared weights: at mid-depth
-(where its prediction becomes the pooling Morse function) and at the
-output, both supervised. Total: $38{,}341$ parameters at width
-$32\times3$ layers --- $\sim\!150$\,KB, comfortably client-side. All
+(where its prediction becomes the pooling Morse function and the routing
+field of Sec.~\ref{sec:morseflow}) and at the
+output, both supervised. Total: $47{,}783$ parameters at width
+$32\times3$ layers --- $\sim\!190$\,KB, comfortably client-side. All
 gradients are hand-derived in \texttt{numpy}, including the Cayley
-inverse, the per-node attention softmax, and the filter head;
+inverse, the geometric rotation blocks, the per-node attention softmax,
+the soft-gated quantile filtration (through the gates, the thresholds,
+and the interpolated order statistics), and the filter head;
 central-difference verification over every parameter (with position
 structure frozen, since it is deliberately stop-grad) gives worst
-relative error $4.3\times10^{-7}$ (M\"obius) and $6.0\times10^{-6}$
-(tetrahedron), and $\|W^\top W - I\|_\infty = 6.7\times10^{-16}$ for the
-transported maps.
+relative error $5.8\times10^{-6}$ (M\"obius), $9.4\times10^{-7}$
+(tetrahedron, live sine transport), and $4.4\times10^{-6}$ (geodesic
+sphere), and $\|W^\top W - I\|_\infty < 10^{-12}$ for the transported
+maps, with $W_0 = I$ exact at initialization.
 
 \subsection{Ownership-driven topological pooling}
 \label{sec:msc}
@@ -379,9 +475,60 @@ chains. Simultaneous merging of equal-persistence families repairs the
 first case but not the second. Interlevel-set components repair the
 class: components map to components under any symmetry of the field, so
 the partition is exactly automorphism-equivariant, verified to machine
-precision. Basin/separatrix structure remains in the fixed built-in
-engine, and a differentiable soft-ascent basin variant is a natural
-extension.
+precision. Basin/separatrix structure is not abandoned --- it returns,
+made equivariant, as the \emph{routing} of message passing below.
+
+\subsection{Morse-flow directed propagation}
+\label{sec:morseflow}
+The Morse--Smale segmentation of~\cite{leventhal2022} entered v2 only as
+a pooling operator. Here it becomes the routing of message passing ---
+the component most native to this line of work. Let $f$ be the mid-depth
+ownership field: already computed, already supervised. Its discrete
+gradient orients edges (for $\{u,v\}$, direction is
+$\mathrm{sign}(f(v)-f(u))$, pointing uphill), and its ascending basins
+partition the board. Every vertex aggregation at layers past the
+mid-depth splits into three learned channels by an edge's role relative
+to the flow:
+\begin{equation}
+m_v \;=\; W_{\uparrow}\!\!\sum_{\substack{u\in N(v)\\ \text{up, same
+basin}}}\!\!\tfrac{h_u}{d_\uparrow(v)}
+\;+\; W_{\downarrow}\!\!\sum_{\substack{u\in N(v)\\ \text{down, same
+basin}}}\!\!\tfrac{h_u}{d_\downarrow(v)}
+\;+\; W_{\leftrightarrow}\!\!\sum_{\substack{u\in N(v)\\ \text{cross
+basin}}}\!\!\tfrac{h_u}{d_\leftrightarrow(v)},
+\label{eq:flow}
+\end{equation}
+ascending (up-manifold), descending (down-manifold), and
+lateral/separatrix --- edges between different basins, i.e.\ crossing a
+ridge where ascending flows diverge (in-basin plateau ties also route
+laterally: flat contested ground behaves as boundary). Isotropic message
+passing averages all three; Eq.~\ref{eq:flow} distinguishes them, and the
+separatrix channel makes contested boundaries --- where Go fights live
+--- first-class carriers of information rather than edges averaged away.
+Ascending manifolds are the paths along which influence flows toward each
+local maximum; they branch exactly at separatrices (the Morse--Smale
+cell boundaries). Routing messages along them means representations
+follow the influence field's actual branching structure instead of
+blending across it: a node near a contested boundary receives ascending
+messages from its own basin distinctly from lateral messages across the
+ridge, so it can represent ``on the Black side of a fight with White
+pressing from \emph{that} direction'' --- which mean aggregation cannot
+express.
+
+Basin labels are computed by the same union-find machinery, with one
+equivariance-driven change (the chiral-plateau obstruction again): raw
+steepest-ascent pointers index-tie-break on plateaus, so instead each
+vertex carries the \emph{set} of plateau-contracted maxima its ascending
+flows can reach --- basin interiors coincide with steepest ascent, while
+boundary vertices are marked by reach-set divergence, which is precisely
+the Morse--Smale reading of a separatrix. The construction is
+value-and-set-defined throughout, hence exactly equivariant.
+Persistence simplification of the routing field is deliberately omitted:
+equal-persistence family merging cannot be made index-free (the same
+obstruction one level up), and over-segmentation only shifts edges into
+the lateral channel --- exactly where contested structure belongs. As
+with the pooling partition, labels are stop-grad structure; $f$'s
+gradient path is its own supervision.
 
 \subsection{Equivariance}
 \label{sec:equivariance}
@@ -396,14 +543,31 @@ Each layer is a composition of permutation-equivariant operators
 ($A,A_\eps,M_{\cdot\cdot},S,P$ conjugate by the permutation; pointwise
 nonlinearities and global means commute with it) with shared weights.
 \end{proof}
-Verified to machine precision for the full v2 stack (filtration levels,
-attention, Cayley transport, ownership-driven pooling): the empty-board
-policy is constant on the WL orbits of the geodesic sphere and the torus,
+Verified to machine precision for the full v3 stack (gated quantile
+levels, attention, Cayley-geometric transport, persistence injection,
+Morse-flow routing, ownership-driven pooling): the empty-board
+policy is constant on the WL orbits of the plane and the torus,
 and exactly symmetric under the seam-preserving M\"obius reflection ---
-all spreads at floating-point noise. The filter $\phi$ is symmetric and
-permutation-equivariant by construction, so level masks map to level
-masks under automorphisms. On non-orientable
-boards the \emph{gauge-dependent} remainder --- seam placement --- is the
+all spreads at floating-point noise. Exactness holds where the geometric
+transport is trivial ($\theta \equiv 0$: flat and, by the $w_1$
+obstruction, non-orientable boards); on curved boards the tangent-frame
+choice is a gauge, and --- exactly like the $\eps$ gauge --- it is
+randomized during training rather than being exactly quotiented out.
+
+Making the proposition true of the \emph{whole} v3 stack required the
+chiral-plateau discipline at every structural decision, because a
+learned field produces exact value ties precisely on symmetric
+positions: the filter's structural decisions (ordering, keeps,
+persistence batching) are made on quantized values so floating-point
+noise cannot split an orbit; the persistence pairing processes
+equal-$\phi$ edges as simultaneous batches with set-defined deaths; the
+quantile keep sets are value comparisons; and the flow routing uses
+reach-sets instead of index-tie-broken pointers. Each of these replaced
+an index-dependent construction that our equivariance tests caught
+breaking symmetry --- the same failure mode, recurring at every level of
+the hierarchy. On non-orientable
+boards the \emph{gauge-dependent} remainder --- seam placement, and frame
+choice on curved boards --- is the
 component gauge augmentation trains away; we report this rather than
 hide it.
 
@@ -415,8 +579,25 @@ replay buffer, Adam. The loss is
 $\mathrm{CE}(\pi, p) + (z-v)^2 + \tfrac12\,\mathrm{MSE}(\hat o_{\rm
 final}) + \tfrac14\,\mathrm{MSE}(\hat o_{\rm mid}) +
 \tfrac14\,\mathrm{BCE}(\phi)$, all targets derived from final
-Tromp--Taylor territory. Gauge augmentation resamples the cocycle per
-game and per optimization step. Two failures specific to this setting are worth
+Tromp--Taylor territory. Gauge augmentation resamples the cocycle (and,
+on curved boards, the tangent frames) per
+game and per optimization step.
+
+\textbf{Successive-training curriculum over filtration levels.}
+Following the successive-training result
+of~\cite{leventhal2025filtration} --- heterophilous levels are where
+learning stalls, homophilous levels are where it starts --- self-play
+and optimization can be restricted to the most homophilous prefix of the
+filtration levels, annealing one more level in every fixed number of
+iterations (the schedule position persists across warm-continued runs).
+Early iterations then train on the cleanest co-ownership level ---
+separable chains, where a policy that has plateaued on the full
+contested graph can still make progress --- before the contested levels
+are switched on. This directly targets the policy-plateau failure mode we
+observed on medium boards, and composes with the board-size curriculum
+(small-board pretraining, warm-continue to larger boards at higher
+simulation depth) already supported by the trainer. Two failures
+specific to this setting are worth
 recording.
 
 \textbf{Transposition ko cycles.} Our search merges states in a
@@ -444,8 +625,17 @@ artifact.
 
 \section{Preliminary verification and evaluation protocol}
 \textbf{What is verified now.} Cocycle-vs-orientability on 11 board
-types; full-parameter gradient checks ($4.5\times10^{-6}$,
-$5.8\times10^{-7}$); machine-precision equivariance as above;
+types; full-parameter gradient checks through every v3 path, including
+the live sine transport, the gated quantile filtration, and an
+odd-width unpaired transport channel ($5.8\times10^{-6}$ M\"obius,
+$9.4\times10^{-7}$ tetrahedron, $4.4\times10^{-6}$ sphere);
+machine-precision equivariance as above; unit-modulus transport angles
+with $\theta \equiv 0$ exactly on flat and non-orientable boards;
+persistence-pair sanity (nonnegative lifetimes, elder-rule ordering, the
+$n{-}1$ / $n_e{-}n{+}1$ tree/cycle split); quantile-level nesting and
+gate bounds; exact three-way partition of directed edges by the flow
+router; curriculum masking and its schedule persistence across resumed
+runs;
 Gauss--Bonnet consistency of the curvature inputs (tetrahedron defect
 $=\pi$ per vertex); browser/Python adjacency parity edge-for-edge on
 cylinder, Klein, and $\RP^2$ boards; end-to-end training and serving
@@ -469,16 +659,20 @@ augmentation-based baseline, testing the equivariance dividend
 of~\cite{elesedy2021} in self-play.
 
 \section{Limitations and future work}
-No continuous $SO(2)$ steerability yet (isotropic aggregation over the
-rotation system); gauge invariance is learned, not guaranteed --- a
+The transport is geometrically initialized but the kernel remains
+isotropic --- full $SO(2)$ steerability over the rotation system is
+open; gauge invariance (seam placement and, on curved boards, frame
+choice) is learned, not guaranteed --- a
 strictly equivariant formulation via the orientation double cover is the
-natural next step; filtration thresholds are fixed hyperparameters
-rather than learned quantiles; the soft-ascent basin variant that would
-restore separatrix structure differentiably remains future work;
-persistent-homology inputs beyond interlevel components ($H_1$ for
-eyes/ko) are pending; automorphism groups are used for verification, not
+natural next step; persistent-homology inputs are the $H_0$ pairs of the
+single-parameter $\phi$-filtration --- multiparameter persistence over
+(co-ownership, influence) and explicit $H_1$ features for eyes/ko are
+pending; the persistence-unsimplified flow router trades noise
+robustness for exact equivariance, and a tie-free simplification scheme
+would recover both; automorphism groups are used for verification, not
 yet target symmetrization; and the empirical study above is the actual
-test of the thesis. A browser export of the network
+test of the thesis --- in particular the curriculum's effect on the
+medium-board policy plateau. A browser export of the network
 is mechanical --- the Morse--Smale machinery already ships in the
 client-side engine --- and would make every trained agent playable with
 no installation.

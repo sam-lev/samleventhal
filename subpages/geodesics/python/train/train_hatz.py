@@ -10,6 +10,9 @@ AlphaZero (see hatz.py). Same loop as train_zero.py, three additions:
 
     python3 train_hatz.py --iters 100                    # all lowest specs
     python3 train_hatz.py --specs mobius,klein,rp2       # non-orientable focus
+    python3 train_hatz.py --curriculum 1 --anneal-every 8   # successive
+        # training over filtration levels: learn on the most homophilous
+        # co-ownership level first, anneal in the contested levels
 """
 
 from __future__ import annotations
@@ -108,13 +111,22 @@ def main():
     ap.add_argument("--games-per-iter", type=int, default=6)
     ap.add_argument("--sims", type=int, default=32)
     ap.add_argument("--hidden", type=int, default=32)
-    ap.add_argument("--layers", type=int, default=3)
+    ap.add_argument("--layers", type=int, default=5)
     ap.add_argument("--batch", type=int, default=32)
     ap.add_argument("--steps-per-iter", type=int, default=60)
     ap.add_argument("--buffer", type=int, default=20000)
     ap.add_argument("--lr", type=float, default=1e-3)
     ap.add_argument("--eval-every", type=int, default=5)
     ap.add_argument("--gauge-aug", type=int, default=1)
+    ap.add_argument("--curriculum", type=int, default=0,
+                    help="successive-training curriculum over filtration "
+                         "levels: start self-play and training on the most "
+                         "homophilous co-ownership level only (clean chains, "
+                         "where a stalled policy can learn), annealing in "
+                         "the heterophilous levels")
+    ap.add_argument("--anneal-every", type=int, default=8, metavar="N",
+                    help="with --curriculum, unlock one more level every N "
+                         "iterations (counted across --resume runs)")
     ap.add_argument("--resume", default=None, metavar="CKPT",
                     help="warm-start weights (and Adam state) from a "
                          "checkpoint; its --hidden/--layers override the CLI, "
@@ -148,9 +160,11 @@ def main():
     # union spec provenance so a curriculum's supports cover every board seen
     seen_specs = sorted(set(net.meta.get("specs", [])) | set(keys)) \
         if args.resume else keys
-    net.meta = {"arch": "hatz", "version": 2, "specs": seen_specs,
+    iters_done = int(net.meta.get("iters_done", 0)) if args.resume else 0
+    net.meta = {"arch": "hatz", "version": 3, "specs": seen_specs,
                 "surfaces": sorted({SPECS[k][0] for k in seen_specs}),
-                "meshes": sorted({SPECS[k][1] for k in seen_specs})}
+                "meshes": sorted({SPECS[k][1] for k in seen_specs}),
+                "iters_done": iters_done}
     buf = deque(maxlen=args.buffer)
     rng = np.random.default_rng(args.seed)
     os.makedirs(CKPT_DIR, exist_ok=True)
@@ -161,6 +175,15 @@ def main():
           f"gauge-aug {'on' if args.gauge_aug else 'off'}")
     for it in range(1, args.iters + 1):
         t0 = time.time()
+        # curriculum: self-play *and* training see only the first
+        # levels_active filtration levels (most homophilous first); one more
+        # level is annealed in every --anneal-every iterations, counted
+        # across resumed runs so a warm-continue keeps its place
+        if args.curriculum:
+            net.levels_active = min(
+                HATZ.K, 1 + (iters_done + it - 1) // args.anneal_every)
+        else:
+            net.levels_active = None
         winners = []
         for g in range(args.games_per_iter):
             key = keys[(it * args.games_per_iter + g) % len(keys)]
@@ -190,6 +213,9 @@ def main():
                 f"loss {np.mean(losses):.3f}  "
                 f"B/W {winners.count('B')}/{winners.count('W')}  "
                 f"{time.time() - t0:.0f}s")
+        if args.curriculum:
+            line += f"  levels {net.levels_active}/{HATZ.K}"
+        net.meta["iters_done"] = iters_done + it
         if it % args.eval_every == 0 or it == args.iters:
             wr = np.mean([eval_vs_random(net, k, boards, 6,
                                          seed=args.seed + it)
