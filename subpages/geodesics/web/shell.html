@@ -135,8 +135,18 @@
        on any topology, no server needed.</p>
     <textarea id="shareCode" readonly></textarea>
     <div class="row"><button id="shareCopy">Copy</button></div>
-    <p style="margin-top:12px">Load a game from a code or shared URL:</p>
-    <input id="shareIn" placeholder="paste a code or URL">
+    <p style="margin-top:12px">Or as a file: standard <b>SGF</b> on the
+       classical board, generalized <b>gSGF</b> (readable by the python
+       package) on every other topology.</p>
+    <div class="row">
+      <button id="sgfDown" class="info" data-info="act.sgfdown">Download SGF</button>
+      <button id="sgfLoadBtn" class="info" data-info="act.sgfload">Load SGF file&hellip;</button>
+      <input type="file" id="sgfFile" accept=".sgf,.gsgf,.json,text/plain"
+             hidden aria-label="SGF file">
+    </div>
+    <p style="margin-top:12px">Load a game from a code, shared URL, or pasted
+       SGF/gSGF text:</p>
+    <input id="shareIn" placeholder="paste a code, URL, or SGF">
     <div class="row"><button id="shareLoad">Load</button></div>
   </div>
 </div>

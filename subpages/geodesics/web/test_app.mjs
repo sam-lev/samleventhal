@@ -72,7 +72,10 @@ function seamCheck(B, tol) {
         if (mode !== "vertices") {
           const m = B.inc.meta;
           const chi = m.nV - m.nE + m.nF;
-          const want = surf === "sphere" ? 2 : surf === "plane" ? 1 : 0;
+          // sphere 2; disk and RP2 (the sphere with antipodes identified) 1;
+          // the flat quotients (torus, cylinder, Mobius, Klein) 0
+          const want = surf === "sphere" ? 2
+            : (surf === "plane" || surf === "rp2") ? 1 : 0;
           if (chi !== want) bad.push(`${surf}:${mesh}:${mode} — chi ${chi}`);
         }
       }

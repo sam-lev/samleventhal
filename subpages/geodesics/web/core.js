@@ -34,6 +34,93 @@ function gridQuotient(nx, ny, wrapX, wrapY, flipX, flipY, mesh) {
   return { adj, uv, nx, ny };
 }
 
+// ---------- topology: grid-quotient faces ------------------------------------
+// The 2-cells of a grid quotient's tiling, with seam identifications applied.
+// Mirrors python/topology._grid_faces exactly (verified by test_app.mjs):
+// faces are enumerated on the universal cover (one quad / two triangles /
+// one brick-wall hexagon per unit cell), each corner is reduced back into
+// the fundamental domain by the same deck transformations the edge
+// construction uses, and a candidate face is kept only if it CLOSES in the
+// quotient graph:
+//   * every reduced corner exists (open boundaries drop the outer ring),
+//   * all corner ids are distinct (identifications can collapse corners,
+//     e.g. at the doubly-flipped RP2 corners),
+//   * every boundary edge of the face is an actual edge of the quotient
+//     (on a Mobius honeycomb the flip shears the bond parity at the seam,
+//     so seam hexagons genuinely do not close).
+// Faces are deduplicated by vertex set (small fundamental domains can reach
+// the same 2-cell from two cover cells).
+//
+// Returns { faces, faceUV, quads, quadPatches }:
+//   faces        vertex-id cycles of every closed 2-cell
+//   faceUV       matching cover coordinates per face (for embedding sites
+//                across seams, incl. the Mobius flip)
+//   quads        square-mesh unit cells only (the cell-paint layer)
+//   quadPatches  their (x, y) anchors (for curved patch subdivision)
+//   fullCover    true when every edge of the graph bounds >= 1 face — the
+//                availability criterion for face/cell incidence play (a
+//                PARTIAL complex, e.g. an open honeycomb rim, would
+//                silently drop playable structure)
+//
+// Hex meshes on flipped quotients return no faces at all rather than a
+// partial set: a complex that never crosses the seam would let downstream
+// consumers silently conclude the surface is orientable.
+function gridFaces(nx, ny, wrapX, wrapY, flipX, flipY, mesh, adj) {
+  const out = { faces: [], faceUV: [], quads: [], quadPatches: [],
+                fullCover: false };
+  if (mesh === "hex" && (flipX || flipY)) return out;
+  const vid = (x, y) => y * nx + x;
+  const red = (x, y) => {                 // reduce_pt for face corners
+    if (x >= nx) { if (!wrapX) return null; x -= nx; if (flipX) y = ny - 1 - y; }
+    if (y >= ny) { if (!wrapY) return null; y -= ny; if (flipY) x = nx - 1 - x; }
+    else if (y < 0) { if (!wrapY) return null; y += ny; if (flipY) x = nx - 1 - x; }
+    return [x, y];
+  };
+  // the quotient's edge set, for the closure check
+  const ek = new Set();
+  adj.forEach((l, a) => l.forEach(b => ek.add(a < b ? a + ":" + b : b + ":" + a)));
+  const has = (i, j) => ek.has(i < j ? i + ":" + j : j + ":" + i);
+  // cover-cell templates: corner offsets, one list per face of the cell
+  const templates = mesh === "square"
+    ? [[[0, 0], [1, 0], [1, 1], [0, 1]]]
+    : mesh === "tri"
+      ? [[[0, 0], [1, 0], [1, 1]], [[0, 0], [1, 1], [0, 1]]]
+      : [[[0, 0], [1, 0], [2, 0], [2, 1], [1, 1], [0, 1]]];   // hex brick
+  const seen = new Set();
+  const ymax = wrapY ? ny : ny - 1;
+  for (let y = 0; y < ymax; y++) {
+    // hex bricks: left wall at x with x = y (mod 2), every other column
+    for (let x = mesh === "hex" ? y % 2 : 0; x < nx;
+         x += mesh === "hex" ? 2 : 1) {
+      for (const corners of templates) {
+        const uvs = corners.map(([dx, dy]) => [x + dx, y + dy]);
+        const pts = uvs.map(([cx, cy]) => red(cx, cy));
+        if (pts.some(p => p === null)) continue;   // ran off an open boundary
+        const ids = pts.map(([cx, cy]) => vid(cx, cy));
+        const key = ids.slice().sort((a, b) => a - b).join(",");
+        if (new Set(ids).size !== ids.length || seen.has(key)) continue;
+        let closed = true;                          // every boundary edge real?
+        for (let k = 0; k < ids.length; k++)
+          if (!has(ids[k], ids[(k + 1) % ids.length])) { closed = false; break; }
+        if (!closed) continue;
+        seen.add(key);
+        out.faces.push(ids);
+        out.faceUV.push(uvs);
+        if (mesh === "square") { out.quads.push(ids); out.quadPatches.push([x, y]); }
+      }
+    }
+  }
+  // full-cover test: does every graph edge bound at least one face?
+  const covered = new Set();
+  for (const f of out.faces)
+    for (let k = 0; k < f.length; k++) {
+      const a = f[k], b = f[(k + 1) % f.length];
+      covered.add(a < b ? a + ":" + b : b + ":" + a);
+    }
+  out.fullCover = out.faces.length > 0 && covered.size === ek.size;
+  return out;
+}
+
 // ---------- topology: 3D box lattice ----------------------------------------
 function boxLattice(n) {
   const vid = (x, y, z) => (z * n + y) * n + x;
@@ -645,7 +732,8 @@ function decodeShare(code) {
 }
 
 if (typeof module !== "undefined") {
-  module.exports = { gridQuotient, boxLattice, geodesicSphere, goldbergSphere,
+  module.exports = { gridQuotient, gridFaces, boxLattice,
+                     geodesicSphere, goldbergSphere,
                      cubeSphere, Engine, chainAt,
                      torusPoint, torusNormal, mobiusPoint, mobiusNormal,
                      surfNormal, cylinderPoint, kleinPoint, rp2Point,

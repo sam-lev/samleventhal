@@ -53,6 +53,104 @@ from . import mesh as _mesh
 MESH_TYPES = ("tri", "square", "hex")
 
 
+def _grid_faces(nx: int, ny: int, wrap_x: bool, wrap_y: bool,
+                flip_x: bool, flip_y: bool, mesh: str,
+                adj: list) -> list | None:
+    """Face list of a grid quotient — the 2-cells of the tiling, with seam
+    identifications applied.
+
+    Faces are enumerated on the universal cover (one quad / two triangles /
+    one brick-wall hexagon per unit cell) and each corner is reduced back
+    into the fundamental domain by the same deck transformations the edge
+    construction uses. A candidate face is kept only if it *closes* in the
+    quotient graph:
+
+      * every reduced corner exists (open boundaries drop the outer ring),
+      * all corner ids are distinct (identifications can collapse corners —
+        e.g. at the doubly-flipped RP² corners),
+      * every boundary edge of the face is an actual edge of the quotient
+        (on a Möbius honeycomb the flip shears the bond parity at the seam,
+        so seam hexagons genuinely do not close).
+
+    Faces are deduplicated by vertex set (a small fundamental domain can
+    reach the same 2-cell from two cover cells).
+
+    Returns None — "this board carries no face data" — for hex meshes on
+    flipped quotients: there the honeycomb's seam cells cannot close, and a
+    *partial* face complex would be worse than none, because downstream
+    consumers (HATZ's orientation cocycle, face-incidence play) would see a
+    complex that never crosses the seam and silently conclude the surface
+    is orientable. Absent faces keep the honest fallbacks in charge.
+    """
+    if mesh == "hex" and (flip_x or flip_y):
+        return None
+
+    def vid(x: int, y: int) -> int:
+        return y * nx + x
+
+    def red(x: int, y: int):
+        """reduce_pt, restated for face corners (same deck transformations)."""
+        if x >= nx:
+            if not wrap_x:
+                return None
+            x -= nx
+            if flip_x:
+                y = ny - 1 - y
+        if y >= ny:
+            if not wrap_y:
+                return None
+            y -= ny
+            if flip_y:
+                x = nx - 1 - x
+        elif y < 0:
+            if not wrap_y:
+                return None
+            y += ny
+            if flip_y:
+                x = nx - 1 - x
+        return x, y
+
+    # the quotient's edge set, for the closure check
+    ek = set()
+    for a, nbrs in enumerate(adj):
+        for b in nbrs:
+            ek.add((a, b) if a < b else (b, a))
+
+    def closed(ids: list[int]) -> bool:
+        return all(
+            ((ids[k], ids[(k + 1) % len(ids)]) if ids[k] < ids[(k + 1) % len(ids)]
+             else (ids[(k + 1) % len(ids)], ids[k])) in ek
+            for k in range(len(ids)))
+
+    # cover-cell templates: corner offsets, one list per face of the cell
+    if mesh == "square":
+        templates = [[(0, 0), (1, 0), (1, 1), (0, 1)]]
+    elif mesh == "tri":
+        templates = [[(0, 0), (1, 0), (1, 1)], [(0, 0), (1, 1), (0, 1)]]
+    else:  # hex: one brick per cell whose left wall parity matches the row
+        templates = [[(0, 0), (1, 0), (2, 0), (2, 1), (1, 1), (0, 1)]]
+
+    faces: list[tuple[int, ...]] = []
+    seen: set[frozenset[int]] = set()
+    ymax = ny if wrap_y else ny - 1
+    for y in range(ymax):
+        xs = range(y % 2, nx, 2) if mesh == "hex" else range(nx)
+        for x in xs:
+            for corners in templates:
+                pts = [red(x + dx, y + dy) for dx, dy in corners]
+                if any(p is None for p in pts):
+                    continue                      # ran off an open boundary
+                ids = [vid(*p) for p in pts]
+                key = frozenset(ids)
+                if len(key) != len(ids) or key in seen:
+                    continue                      # collapsed or duplicate
+                if not closed(ids):
+                    continue                      # a boundary edge is absent
+                seen.add(key)
+                faces.append(tuple(ids))
+    return faces or None
+
+
 def _grid_quotient(name: str, nx: int, ny: int, wrap_x: bool, wrap_y: bool,
                    flip_x: bool, flip_y: bool, mesh: str = "square") -> Board:
     """Grid with optional side identifications and a choice of tiling.
@@ -136,11 +234,16 @@ def _grid_quotient(name: str, nx: int, ny: int, wrap_x: bool, wrap_y: bool,
 
     coords = [(float(x), float(y)) for y in range(ny) for x in range(nx)]
     labels = [f"{x},{y}" for y in range(ny) for x in range(nx)]
+    adj_t = [tuple(sorted(nbrs)) for nbrs in adj]
     board = Board(
         name=name,
         params={"nx": nx, "ny": ny, "mesh": mesh},
-        adj=[tuple(sorted(nbrs)) for nbrs in adj],
+        adj=adj_t,
         coords=coords,
+        # the tiling's 2-cells (None where the honeycomb cannot close):
+        # enables Euler-characteristic checks, face/cell incidence play,
+        # and face-based orientation cocycles on quotient boards
+        faces=_grid_faces(nx, ny, wrap_x, wrap_y, flip_x, flip_y, mesh, adj_t),
         labels=labels,
         meta={"wrap_x": wrap_x, "wrap_y": wrap_y,
               "flip_x": flip_x, "flip_y": flip_y},
@@ -395,6 +498,25 @@ def make_board(surface: str = "sphere", mesh: str = "tri",
 
 
 # ---------------------------------------------------------------------------
+# Incidence-derived boards (stones on edges / faces / all cells)
+# ---------------------------------------------------------------------------
+
+def incidence_board(mode: str = "vertices", **spec) -> Board:
+    """A spec board replayed onto a different cell type (see geodesics.cells).
+
+    mode      vertices | edges | faces | cells
+    **spec    forwarded verbatim to make_board (surface, mesh, resolution,
+              dimension, and any nx/ny/frequency overrides)
+
+    'edges' plays on the line graph L(G), 'faces' on the dual graph, and
+    'cells' on the Hasse diagram of the face poset. Registered as
+    'incidence' so gSGF files of derived-board games reconstruct exactly.
+    """
+    from . import cells as _cells             # local import: cells needs Board
+    return _cells.derive(make_board(**spec), mode)
+
+
+# ---------------------------------------------------------------------------
 # Registry (gSGF reconstruction and the demo CLI)
 # ---------------------------------------------------------------------------
 
@@ -414,6 +536,7 @@ REGISTRY = {
     "torus3": torus3,
     "conway": conway_board,
     "spec": make_board,
+    "incidence": incidence_board,
 }
 
 

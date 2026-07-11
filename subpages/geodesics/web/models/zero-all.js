@@ -3,6 +3,7 @@
 // trained parameters (inlined by the build from the sibling .weights.json).
 // The forward pass mirrors python/train/zeronet.py exactly.
 (function () {
+  if (!WEIGHTS) return;   // no .weights.json beside this model: stay unlisted
   const P = WEIGHTS.params, L = WEIGHTS.layers, D = WEIGHTS.hidden;
 
   function forward(adj, stones, toMove, mask) {

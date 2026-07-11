@@ -135,8 +135,18 @@
        on any topology, no server needed.</p>
     <textarea id="shareCode" readonly></textarea>
     <div class="row"><button id="shareCopy">Copy</button></div>
-    <p style="margin-top:12px">Load a game from a code or shared URL:</p>
-    <input id="shareIn" placeholder="paste a code or URL">
+    <p style="margin-top:12px">Or as a file: standard <b>SGF</b> on the
+       classical board, generalized <b>gSGF</b> (readable by the python
+       package) on every other topology.</p>
+    <div class="row">
+      <button id="sgfDown" class="info" data-info="act.sgfdown">Download SGF</button>
+      <button id="sgfLoadBtn" class="info" data-info="act.sgfload">Load SGF file&hellip;</button>
+      <input type="file" id="sgfFile" accept=".sgf,.gsgf,.json,text/plain"
+             hidden aria-label="SGF file">
+    </div>
+    <p style="margin-top:12px">Load a game from a code, shared URL, or pasted
+       SGF/gSGF text:</p>
+    <input id="shareIn" placeholder="paste a code, URL, or SGF">
     <div class="row"><button id="shareLoad">Load</button></div>
   </div>
 </div>
@@ -177,6 +187,93 @@ function gridQuotient(nx, ny, wrapX, wrapY, flipX, flipY, mesh) {
   const uv = [];
   for (let y = 0; y < ny; y++) for (let x = 0; x < nx; x++) uv.push([x, y]);
   return { adj, uv, nx, ny };
+}
+
+// ---------- topology: grid-quotient faces ------------------------------------
+// The 2-cells of a grid quotient's tiling, with seam identifications applied.
+// Mirrors python/topology._grid_faces exactly (verified by test_app.mjs):
+// faces are enumerated on the universal cover (one quad / two triangles /
+// one brick-wall hexagon per unit cell), each corner is reduced back into
+// the fundamental domain by the same deck transformations the edge
+// construction uses, and a candidate face is kept only if it CLOSES in the
+// quotient graph:
+//   * every reduced corner exists (open boundaries drop the outer ring),
+//   * all corner ids are distinct (identifications can collapse corners,
+//     e.g. at the doubly-flipped RP2 corners),
+//   * every boundary edge of the face is an actual edge of the quotient
+//     (on a Mobius honeycomb the flip shears the bond parity at the seam,
+//     so seam hexagons genuinely do not close).
+// Faces are deduplicated by vertex set (small fundamental domains can reach
+// the same 2-cell from two cover cells).
+//
+// Returns { faces, faceUV, quads, quadPatches }:
+//   faces        vertex-id cycles of every closed 2-cell
+//   faceUV       matching cover coordinates per face (for embedding sites
+//                across seams, incl. the Mobius flip)
+//   quads        square-mesh unit cells only (the cell-paint layer)
+//   quadPatches  their (x, y) anchors (for curved patch subdivision)
+//   fullCover    true when every edge of the graph bounds >= 1 face — the
+//                availability criterion for face/cell incidence play (a
+//                PARTIAL complex, e.g. an open honeycomb rim, would
+//                silently drop playable structure)
+//
+// Hex meshes on flipped quotients return no faces at all rather than a
+// partial set: a complex that never crosses the seam would let downstream
+// consumers silently conclude the surface is orientable.
+function gridFaces(nx, ny, wrapX, wrapY, flipX, flipY, mesh, adj) {
+  const out = { faces: [], faceUV: [], quads: [], quadPatches: [],
+                fullCover: false };
+  if (mesh === "hex" && (flipX || flipY)) return out;
+  const vid = (x, y) => y * nx + x;
+  const red = (x, y) => {                 // reduce_pt for face corners
+    if (x >= nx) { if (!wrapX) return null; x -= nx; if (flipX) y = ny - 1 - y; }
+    if (y >= ny) { if (!wrapY) return null; y -= ny; if (flipY) x = nx - 1 - x; }
+    else if (y < 0) { if (!wrapY) return null; y += ny; if (flipY) x = nx - 1 - x; }
+    return [x, y];
+  };
+  // the quotient's edge set, for the closure check
+  const ek = new Set();
+  adj.forEach((l, a) => l.forEach(b => ek.add(a < b ? a + ":" + b : b + ":" + a)));
+  const has = (i, j) => ek.has(i < j ? i + ":" + j : j + ":" + i);
+  // cover-cell templates: corner offsets, one list per face of the cell
+  const templates = mesh === "square"
+    ? [[[0, 0], [1, 0], [1, 1], [0, 1]]]
+    : mesh === "tri"
+      ? [[[0, 0], [1, 0], [1, 1]], [[0, 0], [1, 1], [0, 1]]]
+      : [[[0, 0], [1, 0], [2, 0], [2, 1], [1, 1], [0, 1]]];   // hex brick
+  const seen = new Set();
+  const ymax = wrapY ? ny : ny - 1;
+  for (let y = 0; y < ymax; y++) {
+    // hex bricks: left wall at x with x = y (mod 2), every other column
+    for (let x = mesh === "hex" ? y % 2 : 0; x < nx;
+         x += mesh === "hex" ? 2 : 1) {
+      for (const corners of templates) {
+        const uvs = corners.map(([dx, dy]) => [x + dx, y + dy]);
+        const pts = uvs.map(([cx, cy]) => red(cx, cy));
+        if (pts.some(p => p === null)) continue;   // ran off an open boundary
+        const ids = pts.map(([cx, cy]) => vid(cx, cy));
+        const key = ids.slice().sort((a, b) => a - b).join(",");
+        if (new Set(ids).size !== ids.length || seen.has(key)) continue;
+        let closed = true;                          // every boundary edge real?
+        for (let k = 0; k < ids.length; k++)
+          if (!has(ids[k], ids[(k + 1) % ids.length])) { closed = false; break; }
+        if (!closed) continue;
+        seen.add(key);
+        out.faces.push(ids);
+        out.faceUV.push(uvs);
+        if (mesh === "square") { out.quads.push(ids); out.quadPatches.push([x, y]); }
+      }
+    }
+  }
+  // full-cover test: does every graph edge bound at least one face?
+  const covered = new Set();
+  for (const f of out.faces)
+    for (let k = 0; k < f.length; k++) {
+      const a = f[k], b = f[(k + 1) % f.length];
+      covered.add(a < b ? a + ":" + b : b + ":" + a);
+    }
+  out.fullCover = out.faces.length > 0 && covered.size === ek.size;
+  return out;
 }
 
 // ---------- topology: 3D box lattice ----------------------------------------
@@ -790,7 +887,8 @@ function decodeShare(code) {
 }
 
 if (typeof module !== "undefined") {
-  module.exports = { gridQuotient, boxLattice, geodesicSphere, goldbergSphere,
+  module.exports = { gridQuotient, gridFaces, boxLattice,
+                     geodesicSphere, goldbergSphere,
                      cubeSphere, Engine, chainAt,
                      torusPoint, torusNormal, mobiusPoint, mobiusNormal,
                      surfNormal, cylinderPoint, kleinPoint, rp2Point,
@@ -2279,6 +2377,7 @@ const WEIGHTS = {"hidden": 32, "layers": 3, "meta": {"specs": ["sphere", "plane"
 // trained parameters (inlined by the build from the sibling .weights.json).
 // The forward pass mirrors python/train/zeronet.py exactly.
 (function () {
+  if (!WEIGHTS) return;   // no .weights.json beside this model: stay unlisted
   const P = WEIGHTS.params, L = WEIGHTS.layers, D = WEIGHTS.hidden;
 
   function forward(adj, stones, toMove, mask) {
@@ -2395,6 +2494,11 @@ const RS = 1.55;                        // sphere embedding radius
 const TOR = { R: 1.12, r: 0.56 };       // torus embedding
 const MOB = { R: 1.30, w: 0.50 };       // Möbius embedding
 
+// Every surface exposes every mesh its identifications admit. Grid scales
+// are (nx, ny) pairs; honeycombs carry parity conditions (even sides across
+// plain wraps — see gridFaces / the python package for the mathematics), and
+// the Klein bottle / RP2 refuse the honeycomb outright (the brick parity
+// cannot be made consistent across a flipped seam meeting a second gluing).
 const SURFACES = {
   sphere: {
     label: "Sphere S\u00B2",
@@ -2407,7 +2511,9 @@ const SURFACES = {
   plane: {
     label: "Plane D\u00B2",
     meshes: {
+      tri:    { scales: [[9, 9], [13, 13], [19, 19]] },  // + one diagonal/cell
       square: { scales: [[9, 9], [13, 13], [19, 19]] },  // the classical boards
+      hex:    { scales: [[10, 10], [14, 14], [20, 20]] },// brick-wall honeycomb
     },
   },
   torus: {
@@ -2435,31 +2541,44 @@ const SURFACES = {
   cylinder: {
     label: "Cylinder",
     meshes: {
+      tri:    { scales: [[9, 5], [11, 7], [13, 9]] },
       square: { scales: [[9, 5], [11, 7], [13, 9]] },
+      hex:    { scales: [[10, 6], [12, 8], [14, 10]] },  // parity: even nx
     },
   },
   klein: {
     label: "Klein bottle K\u00B2",
     meshes: {
+      tri:    { scales: [[7, 7], [9, 9], [11, 11]] },
       square: { scales: [[7, 7], [9, 9], [11, 11]] },
+      // hex: obstructed — flip_x with wrap_y shears the brick parity
     },
   },
   rp2: {
     label: "Projective plane \u211DP\u00B2",
     meshes: {
+      tri:    { scales: [[7, 7], [9, 9], [11, 11]] },
       square: { scales: [[7, 7], [9, 9], [11, 11]] },
+      // hex: obstructed — the doubly-flipped gluing refuses the honeycomb
     },
   },
 };
 
-// quotient-grid surfaces: identification flags + display style. Adjacency
-// conventions verified edge-for-edge against the python package (test suite).
+// quotient-grid surfaces: identification flags + display style + the plate
+// invariants (surface symbol, Euler characteristic, boundary-circle count).
+// Adjacency conventions verified edge-for-edge against the python package
+// (test suite).
 const QUOT = {
-  torus:    { wrapY: true,  flipX: false, flipY: false, flat: false },
-  mobius:   { wrapY: false, flipX: true,  flipY: false, flat: true  },
-  cylinder: { wrapY: false, flipX: false, flipY: false, flat: false },
-  klein:    { wrapY: true,  flipX: true,  flipY: false, flat: true  },
-  rp2:      { wrapY: true,  flipX: true,  flipY: true,  flat: true  },
+  torus:    { wrapY: true,  flipX: false, flipY: false, flat: false,
+              sym: "T\u00B2", chi: 0, bnd: 0 },
+  mobius:   { wrapY: false, flipX: true,  flipY: false, flat: true,
+              sym: "M\u00B2", chi: 0, bnd: 1 },
+  cylinder: { wrapY: false, flipX: false, flipY: false, flat: false,
+              sym: "S\u00B9\u00D7I", chi: 0, bnd: 2 },
+  klein:    { wrapY: true,  flipX: true,  flipY: false, flat: true,
+              sym: "K\u00B2", chi: 0, bnd: 0 },
+  rp2:      { wrapY: true,  flipX: true,  flipY: true,  flat: true,
+              sym: "\u211DP\u00B2", chi: 1, bnd: 0 },
 };
 const CYL = { R: 1.7, sp: 0.62 };
 const KLN = { a: 2.1, b: 0.85 };
@@ -2483,18 +2602,40 @@ const MESH_LABELS = { tri: "Triangular \u00B7 deg 6",
                       square: "Square \u00B7 deg 4",
                       hex: "Hexagonal \u00B7 deg 3" };
 const SCALE_LABELS = ["I", "II", "III"];
-const CELLS_OK = { "sphere:tri": 1, "sphere:square": 1, "sphere:hex": 1,
-                   "plane:square": 1,
-                   "torus:square": 1, "mobius:square": 1 };
-
-// incidence modes need face lists: all sphere meshes and the grid meshes
-// that close up. The Möbius honeycomb stays a vertex board — the flip
-// shears the bond parity at the seam, so its hexagons cannot close there
-// (verified per face at build time). The 3D box keeps its canonical board.
-const INC_OK = { "sphere:tri": 1, "sphere:square": 1, "sphere:hex": 1,
-                 "plane:square": 1,
-                 "torus:tri": 1, "torus:square": 1, "torus:hex": 1,
-                 "mobius:tri": 1, "mobius:square": 1 };
+// ---------- availability: which boards support cell paint / incidence play ---
+// Both tables are COMPUTED, not hand-maintained: for every grid combo in
+// SURFACES we build the smallest scale's quotient and its face complex
+// (gridFaces, shared with the python package) and test coverage. Coverage is
+// scale-independent for these lattices — the parity conditions are baked
+// into the scale tables above — so the smallest scale decides for all three.
+//
+//   INC_OK    incidence play (stones on edges / faces / all cells) needs the
+//             face complex to cover EVERY edge of the graph. Where it covers
+//             only part (an open honeycomb rim; the sheared Möbius-honeycomb
+//             seam) the board honestly stays a vertex board — a partial
+//             complex would silently drop playable structure.
+//   CELLS_OK  the cell-paint layer additionally needs square unit cells
+//             (curved patches are subdivided per quad). Sphere meshes paint
+//             their native faces directly.
+const { INC_OK, CELLS_OK } = (() => {
+  const inc = {}, cel = {};
+  for (const surf of Object.keys(SURFACES)) {
+    for (const mesh of Object.keys(SURFACES[surf].meshes)) {
+      const k = surf + ":" + mesh;
+      if (surf === "sphere") { inc[k] = 1; cel[k] = 1; continue; }
+      if (surf === "box") continue;                 // 3D lattice: no 2-cells
+      const [nx, ny] = SURFACES[surf].meshes[mesh].scales[0];
+      const q = QUOT[surf] || { wrapY: false, flipX: false, flipY: false };
+      const wrapX = surf !== "plane";
+      const g = gridQuotient(nx, ny, wrapX, q.wrapY, q.flipX, q.flipY, mesh);
+      const F = gridFaces(nx, ny, wrapX, q.wrapY, q.flipX, q.flipY, mesh,
+                          g.adj);
+      if (F.fullCover) inc[k] = 1;
+      if (mesh === "square" && F.quads.length) cel[k] = 1;
+    }
+  }
+  return { INC_OK: inc, CELLS_OK: cel };
+})();
 const INC_MODES = ["vertices", "edges", "faces", "cells"];
 const INC_LABELS = { vertices: "Stones: vertices", edges: "Stones: edges",
                      faces: "Stones: faces", cells: "Stones: all cells" };
@@ -2655,82 +2796,39 @@ function buildBoard(surface, meshType, scaleIdx) {
       const modal = modalDegree(B.adj);
       B.adj.forEach((l, i) => { if (l.length < modal) B.defects.add(i); });
     }
-    if ((surface === "torus" || surface === "mobius") &&
-        (meshType === "square" || meshType === "tri" ||
-         (meshType === "hex" && wrapY))) {
-      // grid cells as faces (corner vertex ids, with seam identifications)
-      const vid = (x, y) => y * nx + x;
-      const red = (x, y) => {
-        if (x >= nx) { x -= nx; if (flipX) y = ny - 1 - y; }
-        if (y >= ny) { if (!wrapY) return null; y -= ny; }
-        else if (y < 0) { if (!wrapY) return null; y += ny; }
-        return [x, y];
-      };
-      const faces = [], patches = [], meshFaces = [], meshFaceUV = [];
-      const ymax = wrapY ? ny : ny - 1;
-      if (meshType === "hex") {
-        // brick-wall hexagons: left wall at (x,y) with x ≡ y (mod 2). Every
-        // boundary edge is checked against the quotient graph — on a Möbius
-        // band the flip shears the bond parity at the seam, hexagons there
-        // fail to close, and the honeycomb keeps its canonical vertex board.
-        const ek = new Set();
-        B.adj.forEach((l, a) => l.forEach(b =>
-          ek.add(a < b ? a + ":" + b : b + ":" + a)));
-        const has = (i, j) => ek.has(i < j ? i + ":" + j : j + ":" + i);
-        for (let y = 0; y < ymax; y++)
-          for (let x = y % 2; x < nx; x += 2) {
-            const uvs = [[x, y], [x + 1, y], [x + 2, y],
-                         [x + 2, y + 1], [x + 1, y + 1], [x, y + 1]];
-            const c = uvs.map(([cx, cy]) => red(cx, cy));
-            if (c.some(q => q === null)) continue;
-            const ids = c.map(([cx, cy]) => vid(cx, cy));
-            let closed = true;
-            for (let i = 0; i < 6; i++)
-              if (!has(ids[i], ids[(i + 1) % 6])) { closed = false; break; }
-            if (!closed) continue;
-            meshFaces.push(ids);
-            meshFaceUV.push(uvs);
-          }
-      } else {
-        const cellFaces = meshType === "square"
-          ? [[[0, 0], [1, 0], [1, 1], [0, 1]]]                      // one quad
-          : [[[0, 0], [1, 0], [1, 1]], [[0, 0], [1, 1], [0, 1]]];  // two triangles
-        for (let y = 0; y < ymax; y++)
-          for (let x = 0; x < nx; x++) {
-            for (const corners of cellFaces) {
-              const uvs = corners.map(([dx, dy]) => [x + dx, y + dy]);
-              const c = uvs.map(([cx, cy]) => red(cx, cy));
-              if (c.some(q => q === null)) continue;
-              const ids = c.map(([cx, cy]) => vid(cx, cy));
-              meshFaces.push(ids);
-              meshFaceUV.push(uvs);
-              if (meshType === "square") { faces.push(ids); patches.push([x, y]); }
-            }
-          }
-      }
-      if (meshType === "square") B.cells = { faces, patches, P };
-      if (meshFaces.length) {
-        B.meshFaces = meshFaces;
-        B.meshFaceUV = meshFaceUV;
-      }
-    }
-    const surfSym = surface === "torus" ? "T\u00B2" : "M\u00B2";
+    // faces: the tiling's closed 2-cells, seam identifications applied.
+    // gridFaces (core.js, shared with the python package and verified
+    // against it) enumerates cover cells, reduces their corners through the
+    // deck transformations, and keeps only faces that genuinely close in
+    // the quotient graph — so RP2's collapsed corners and the sheared
+    // Möbius-honeycomb seam are handled uniformly, with no per-surface
+    // special cases here.
+    const gf = gridFaces(nx, ny, true, wrapY, flipX, flipY, meshType, B.adj);
+    if (gf.quads.length)                       // cell-paint layer (square only)
+      B.cells = { faces: gf.quads, patches: gf.quadPatches, P };
+    if (gf.faces.length && gf.fullCover) {     // incidence derivation input:
+      B.meshFaces = gf.faces;                  // only complete complexes feed
+      B.meshFaceUV = gf.faceUV;                // edge/face/cell play (partial
+    }                                          // ones would drop structure)
+    const q = QUOT[surface];
     B.plate = [
-      { k: "plate.surface", t: surfSym, edit: "surface" },
+      { k: "plate.surface", t: q.sym, edit: "surface" },
       { k: "plate.mesh", t: nx + "\u00D7" + ny + " " + meshType, edit: "mesh" },
       { k: "plate.V", t: "V " + B.adj.length, edit: "scale" },
-      { k: "plate.chi", t: "\u03C7 0" },
-      { k: "plate.boundary", t: "\u2202 " + (surface === "torus" ? 0 : 1) },
+      { k: "plate.chi", t: "\u03C7 " + q.chi },
+      { k: "plate.boundary", t: "\u2202 " + q.bnd },
       { k: "plate.deg", t: "deg " + degText(B.adj) },
     ];
   }
 
-  else if (surface === "plane") {          // the classical boards
+  else if (surface === "plane") {          // the classical boards + variants
     const [nx, ny] = scale;
     const g = gridQuotient(nx, ny, false, false, false, false, meshType);
     B.adj = g.adj; B.nx = nx; B.ny = ny; B.uv = g.uv;
     const sp = 2.8 / (Math.max(nx, ny) - 1);
     B._sp = sp;
+    // flat embedding, centered; y grows downward on the lattice, upward on
+    // screen (SGF's coordinate convention keeps 'aa' at the top left)
     const P = (u, v) => [(u - (nx - 1) / 2) * sp, ((ny - 1) / 2 - v) * sp, 0];
     const N = () => [0, 0, 1];
     B._P = P; B._N = N; B._wrapX = false; B._wrapY = false; B._flipX = false;
@@ -2746,23 +2844,22 @@ function buildBoard(surface, meshType, scaleIdx) {
       }
       return out;
     };
+    // brass: boundary points (fewer liberties than the modal interior degree)
     const modal = modalDegree(B.adj);
     B.adj.forEach((l, i) => { if (l.length < modal) B.defects.add(i); });
-    // faces: every unit cell, no seams to reduce across
-    const vid = (x, y) => y * nx + x;
-    const faces = [], patches = [], meshFaceUV = [];
-    for (let y = 0; y < ny - 1; y++)
-      for (let x = 0; x < nx - 1; x++) {
-        faces.push([vid(x, y), vid(x + 1, y), vid(x + 1, y + 1), vid(x, y + 1)]);
-        patches.push([x, y]);
-        meshFaceUV.push([[x, y], [x + 1, y], [x + 1, y + 1], [x, y + 1]]);
-      }
-    B.cells = { faces, patches, P };
-    B.meshFaces = faces;
-    B.meshFaceUV = meshFaceUV;
+    // faces via the shared builder: quads for square, triangle pairs for
+    // tri, bricks for hex. A bounded honeycomb's rim edges bound no brick
+    // (fullCover false), so plane-hex honestly stays a vertex board.
+    const gf = gridFaces(nx, ny, false, false, false, false, meshType, B.adj);
+    if (gf.quads.length)
+      B.cells = { faces: gf.quads, patches: gf.quadPatches, P };
+    if (gf.faces.length && gf.fullCover) {
+      B.meshFaces = gf.faces;
+      B.meshFaceUV = gf.faceUV;
+    }
     B.plate = [
       { k: "plate.surface", t: "D\u00B2", edit: "surface" },
-      { k: "plate.mesh", t: nx + "\u00D7" + ny + " square", edit: "mesh" },
+      { k: "plate.mesh", t: nx + "\u00D7" + ny + " " + meshType, edit: "mesh" },
       { k: "plate.V", t: "V " + B.adj.length, edit: "scale" },
       { k: "plate.chi", t: "\u03C7 1" },
       { k: "plate.boundary", t: "\u2202 1" },
@@ -3387,6 +3484,356 @@ function copyShare() {
   } else { document.execCommand("copy"); done(); }
 }
 
+// ---------- SGF: download / load ----------------------------------------------
+// Two dialects, chosen by what the board can honestly express:
+//
+//   classic SGF (FF[4])   only the classical board — plane, square mesh,
+//                         stones on vertices — has the letter-pair grid
+//                         coordinates SGF assumes. Files interoperate with
+//                         every other Go tool.
+//   gSGF-0.1 (JSON)       everything else. The board declaration is a spec
+//                         reference (surface x mesh x size x incidence)
+//                         instead of SZ, and moves are vertex ids. The
+//                         schema matches python/gsgf.py exactly, so a file
+//                         downloaded here replays with the python package
+//                         (geodesics.gsgf.loads) and vice versa; meta.web
+//                         additionally pins this page's own spec so a
+//                         round trip through the browser is exact.
+//
+// Loading replays every move through the rules engine (like the share
+// codec), so a corrupted or edited file fails loudly, never silently.
+
+// vertex id -> SGF letter pair. Both use 'a' at the top-left and row-major
+// order, so the mapping is direct: column letter then row letter.
+function sgfCoord(v, nx) {
+  return String.fromCharCode(97 + (v % nx)) +
+         String.fromCharCode(97 + Math.floor(v / nx));
+}
+
+// The gSGF board declaration for the current spec: parameters that
+// python's make_board (registry name "spec") — or, for non-vertex sites,
+// incidence_board (registry name "incidence") — rebuilds exactly.
+function gsgfBoardSpec() {
+  const scale = SURFACES[state.surface].meshes[state.mesh]
+    .scales[state.scaleIdx];
+  let params;
+  if (state.surface === "sphere") {
+    // web scales are frequencies; the spec API's abstract resolution maps
+    // f = r (tri, hex) and f = r + 1 (cube-sphere). frequency is also
+    // passed explicitly so the size is pinned regardless of the mapping.
+    params = { surface: "sphere", mesh: state.mesh,
+               resolution: state.mesh === "square" ? scale - 1 : scale,
+               dimension: 2, frequency: scale };
+  } else if (state.surface === "box") {
+    params = { surface: "box", mesh: "square", resolution: 1, dimension: 3,
+               nx: scale, ny: scale, nz: scale };
+  } else {
+    params = { surface: state.surface, mesh: state.mesh, resolution: 1,
+               dimension: 2, nx: scale[0], ny: scale[1] };
+  }
+  return state.incidence !== "vertices"
+    ? { type: "incidence", params: { mode: state.incidence, ...params } }
+    : { type: "spec", params };
+}
+
+// Serialize the current game. Returns { text, filename, kind }.
+function gameToSGF() {
+  const eng = state.eng;
+  const stamp = new Date().toISOString().slice(0, 10);
+  const classical = state.surface === "plane" && state.mesh === "square" &&
+                    state.incidence === "vertices";
+  if (classical) {
+    const nx = state.B.nx;
+    let s = "(;GM[1]FF[4]CA[UTF-8]AP[Geodesics:0.2]RU[Tromp-Taylor]" +
+            "SZ[" + nx + "]KM[7.5]DT[" + stamp + "]";
+    for (const [c, v] of eng.moves)
+      s += ";" + (c === BLACK ? "B" : "W") +
+           "[" + (v === null ? "" : sgfCoord(v, nx)) + "]";
+    s += ")";
+    return { text: s, kind: "SGF",
+             filename: "geodesics-" + nx + "x" + nx + "-" +
+                       eng.moves.length + "m.sgf" };
+  }
+  const doc = {
+    format: "gSGF-0.1",
+    board: gsgfBoardSpec(),
+    rules: { allow_suicide: false, superko: "positional", komi: 7.5 },
+    moves: eng.moves.map(([c, v]) => v === null
+      ? { c: c === BLACK ? "B" : "W", pass: true }
+      : { c: c === BLACK ? "B" : "W", v }),
+    meta: {
+      app: "geodesics-web-0.2", date: stamp,
+      // this page's own spec, for an exact browser round trip
+      web: { surface: state.surface, mesh: state.mesh,
+             scaleIdx: state.scaleIdx, incidence: state.incidence },
+    },
+  };
+  return { text: JSON.stringify(doc, null, 2), kind: "gSGF",
+           filename: "geodesics-" + state.surface + "-" + state.mesh +
+                     (state.incidence !== "vertices"
+                       ? "-" + state.incidence : "") +
+                     "-" + eng.moves.length + "m.gsgf" };
+}
+
+// Trigger a browser download of a text file (no server involved).
+function downloadText(filename, text, mime) {
+  const blob = new Blob([text], { type: mime || "application/octet-stream" });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = filename;
+  document.body.appendChild(a);
+  a.click();
+  setTimeout(() => { URL.revokeObjectURL(url); a.remove(); }, 0);
+}
+
+function downloadSGF() {
+  const { text, filename, kind } = gameToSGF();
+  downloadText(filename, text,
+               kind === "SGF" ? "application/x-go-sgf" : "application/json");
+  message("downloaded " + filename +
+    (kind === "SGF"
+      ? " \u2014 a standard SGF, readable by any Go tool"
+      : " \u2014 generalized SGF (JSON); replay it here or with the python package"),
+    6200);
+}
+
+// ---- classic SGF parsing ----
+// A minimal FF[3]/FF[4] reader: walks the main line (the FIRST child at
+// every branch point; sibling variations are skipped), collecting each
+// node's properties. Property values honor backslash escapes; lowercase
+// letters in old-style identifiers ("AddBlack") are ignored per the spec.
+function parseClassicSGF(text) {
+  const nodes = [];
+  const taken = [];                        // taken[d]: a child at depth d
+  let i = 0, depth = 0;
+  const n = text.length;
+  while (i < n) {
+    const ch = text[i];
+    if (ch === "(") {
+      depth++;
+      if (taken[depth]) {                  // a sibling variation: skip subtree
+        let d = 1;
+        i++;
+        while (i < n && d > 0) {
+          if (text[i] === "[") {           // values may contain parentheses
+            i++;
+            while (i < n && text[i] !== "]") { if (text[i] === "\\") i++; i++; }
+          } else if (text[i] === "(") d++;
+          else if (text[i] === ")") d--;
+          i++;
+        }
+        depth--;
+        continue;
+      }
+      taken[depth] = true;
+      i++;
+    } else if (ch === ")") {
+      taken.length = depth + 1;            // forget only DEEPER branch marks:
+      depth--;                             // taken[depth] must survive so the
+      i++;                                 // next '(' here reads as a sibling
+      if (depth <= 0) break;               // end of the main game tree
+    } else if (ch === ";") {
+      nodes.push({});
+      i++;
+    } else if (/[A-Za-z]/.test(ch)) {
+      let id = "";
+      while (i < n && /[A-Za-z]/.test(text[i])) { id += text[i]; i++; }
+      id = id.replace(/[a-z]/g, "");       // FF[3] long names -> short form
+      const vals = [];
+      while (i < n && text[i] === "[") {
+        i++;
+        let v = "";
+        while (i < n && text[i] !== "]") {
+          if (text[i] === "\\") i++;       // escaped ] (or anything)
+          v += text[i];
+          i++;
+        }
+        i++;
+        vals.push(v);
+      }
+      if (nodes.length && id) {
+        const node = nodes[nodes.length - 1];
+        (node[id] = node[id] || []).push(...vals);
+      }
+    } else i++;
+  }
+  return nodes;
+}
+
+// Load a classic SGF onto the classical board (plane / square / vertices).
+function loadClassicSGF(text) {
+  let nodes;
+  try { nodes = parseClassicSGF(text); }
+  catch (e) { message("could not parse that SGF: " + e.message); return false; }
+  if (!nodes.length) { message("no SGF nodes found"); return false; }
+  const root = nodes[0];
+  if (root.GM && root.GM[0] !== "1") {
+    message("that SGF is not a Go record (GM[" + root.GM[0] + "])");
+    return false;
+  }
+  const szRaw = (root.SZ && root.SZ[0]) || "19";
+  if (szRaw.indexOf(":") >= 0) {
+    message("non-square SGF boards are not supported"); return false;
+  }
+  const sz = parseInt(szRaw, 10);
+  const idx = SURFACES.plane.meshes.square.scales
+    .findIndex(sc => sc[0] === sz);
+  if (idx < 0) {
+    message("SGF board size " + sz +
+            " \u2014 this app offers the classical 9, 13 and 19"); return false;
+  }
+  if (root.AB || root.AW || (root.HA && parseInt(root.HA[0], 10) > 0)) {
+    message("SGF setup / handicap stones are not supported yet");
+    return false;
+  }
+  state.surface = "plane"; state.mesh = "square";
+  state.scaleIdx = idx; state.incidence = "vertices";
+  refreshSelectors(); refreshPaintOptions();
+  newBoard(false);
+  for (const nd of nodes) {
+    const col = nd.B ? BLACK : nd.W ? WHITE : 0;
+    if (!col) continue;                    // root / comment-only nodes
+    if (state.eng.toMove !== col) {
+      message("SGF move order violates alternation \u2014 fresh board");
+      newBoard(); return false;
+    }
+    const cs = (nd.B || nd.W)[0] || "";
+    let r;
+    if (cs === "" || (sz <= 19 && cs === "tt")) r = state.eng.pass();
+    else {
+      const x = cs.charCodeAt(0) - 97, y = cs.charCodeAt(1) - 97;
+      if (!(x >= 0 && x < sz && y >= 0 && y < sz)) {
+        message("SGF coordinate '" + cs + "' out of range \u2014 fresh board");
+        newBoard(); return false;
+      }
+      r = state.eng.play(y * sz + x);      // row-major, 'aa' top-left
+    }
+    if (r.err) {
+      message("SGF contains an illegal move (" + (ERRTXT[r.err] || r.err) +
+              ") \u2014 fresh board");
+      newBoard(); return false;
+    }
+    if (r.over) state.over = true;
+  }
+  sync(); renderPlate(); syncHash();
+  message("loaded SGF \u2014 " + state.eng.moves.length + " moves, " +
+    (state.eng.toMove === BLACK ? "Black" : "White") + " to play", 5200);
+  scheduleAI();
+  return true;
+}
+
+// ---- gSGF loading ----
+// Map a gSGF board declaration onto this page's spec. meta.web (present in
+// files this page wrote) is exact; otherwise the spec params are matched
+// against the scale tables — including the resolution -> size defaults the
+// python spec API uses, so python-written files load when their size exists
+// here (and fail with a pointer to the python package when it does not).
+function webSpecFromGSGF(doc) {
+  const w = doc.meta && doc.meta.web;
+  if (w && SURFACES[w.surface] && SURFACES[w.surface].meshes[w.mesh] &&
+      SURFACES[w.surface].meshes[w.mesh].scales[w.scaleIdx] !== undefined &&
+      INC_MODES.includes(w.incidence || "vertices"))
+    return { surface: w.surface, mesh: w.mesh, scaleIdx: w.scaleIdx,
+             incidence: w.incidence || "vertices" };
+  const b = doc.board || {};
+  const p = b.params || {};
+  let incidence = "vertices";
+  if (b.type === "incidence") incidence = p.mode || "vertices";
+  else if (b.type !== "spec") return null;   // explicit graphs: python-only
+  const alias = { sphere: "sphere", s2: "sphere",
+                  plane: "plane", disk: "plane", box: "plane",
+                  cylinder: "cylinder", annulus: "cylinder",
+                  torus: "torus", t2: "torus",
+                  mobius: "mobius", moebius: "mobius",
+                  klein: "klein", rp2: "rp2", projective: "rp2" };
+  let surf = alias[String(p.surface || "").toLowerCase()];
+  const dim = p.dimension || 2;
+  if (dim === 3) surf = surf === "plane" ? "box" : null;  // only I^3 renders
+  else if (dim !== 2) return null;
+  if (!surf || !SURFACES[surf]) return null;
+  const mesh = p.mesh || "square";
+  const entry = SURFACES[surf].meshes[mesh];
+  if (!entry) return null;
+  const r = p.resolution || 1;
+  let idx;
+  if (surf === "sphere") {
+    const f = p.frequency !== undefined ? p.frequency
+      : mesh === "square" ? r + 1 : r;       // the spec API's defaults
+    idx = entry.scales.indexOf(f);
+  } else if (surf === "box") {
+    const nxd = p.nx !== undefined ? p.nx : r + 3;
+    idx = entry.scales.indexOf(nxd);
+  } else {
+    const nxd = p.nx !== undefined ? p.nx
+      : mesh === "hex" ? 2 * r + 4 : 2 * r + 3;
+    const nyd = p.ny !== undefined ? p.ny
+      : mesh === "hex" ? (surf === "mobius" ? 2 * r + 3 : 2 * r + 4)
+                       : 2 * r + 3;
+    idx = entry.scales.findIndex(sc => sc[0] === nxd && sc[1] === nyd);
+  }
+  if (idx === undefined || idx < 0) return null;
+  return { surface: surf, mesh, scaleIdx: idx, incidence };
+}
+
+function loadGSGF(text) {
+  let doc;
+  try { doc = JSON.parse(text); }
+  catch (e) { message("could not parse that gSGF: " + e.message); return false; }
+  if (doc.format !== "gSGF-0.1") {
+    message("unsupported gSGF format: " + doc.format); return false;
+  }
+  const spec = webSpecFromGSGF(doc);
+  if (!spec) {
+    message("that gSGF names a board this page cannot build \u2014 the python " +
+            "package (geodesics.gsgf) replays every gSGF file");
+    return false;
+  }
+  if (spec.incidence !== "vertices" &&
+      !INC_OK[spec.surface + ":" + spec.mesh]) {
+    message("gSGF names an incidence structure unavailable on that board");
+    return false;
+  }
+  if (doc.rules && doc.rules.komi !== undefined && doc.rules.komi !== 7.5)
+    message("note: the file plays komi " + doc.rules.komi +
+            " \u2014 this page scores with komi 7.5", 6000);
+  state.surface = spec.surface; state.mesh = spec.mesh;
+  state.scaleIdx = spec.scaleIdx; state.incidence = spec.incidence;
+  refreshSelectors(); refreshPaintOptions();
+  newBoard(false);
+  for (const mv of doc.moves || []) {
+    const col = mv.c === "B" ? BLACK : mv.c === "W" ? WHITE : 0;
+    if (!col || state.eng.toMove !== col) {
+      message("gSGF move order violates alternation \u2014 fresh board");
+      newBoard(); return false;
+    }
+    const r = mv.pass ? state.eng.pass() : state.eng.play(mv.v);
+    if (r.err) {
+      message("gSGF contains an illegal move (" + (ERRTXT[r.err] || r.err) +
+              ") \u2014 fresh board");
+      newBoard(); return false;
+    }
+    if (r.over) state.over = true;
+  }
+  sync(); renderPlate(); syncHash();
+  message("loaded gSGF \u2014 " + state.eng.moves.length + " moves, " +
+    (state.eng.toMove === BLACK ? "Black" : "White") + " to play", 5200);
+  scheduleAI();
+  return true;
+}
+
+// Dispatch on the file's first character: '(' is a classic SGF game tree,
+// '{' is a gSGF JSON container.
+function loadSGFText(text) {
+  const t = String(text).trim();
+  if (!t) { message("that file is empty"); return false; }
+  if (t[0] === "{") return loadGSGF(t);
+  if (t[0] === "(") return loadClassicSGF(t);
+  message("not an SGF or gSGF file (expected '(' or '{' at the start)");
+  return false;
+}
+
+
 // ---------- AI opponent --------------------------------------------------------
 // The engine (GeoAI) sees only the adjacency graph, the stone array and a
 // legal-move mask computed here by the host rules — legality (ko, superko,
@@ -3637,8 +4084,12 @@ const EXPLAIN = {
       const F = M ? M.nF : B.meshFaces.length;
       b = "\u03C7 = V \u2212 E + F = " + V + " \u2212 " + E + " + " + F +
           " = 1. The disk is contractible \u2014 topologically trivial \u2014 so unlike the sphere it forces no curvature defects, and unlike the flat quotients it isn't closed. What it has instead is a boundary, and on this board the boundary is the whole story: every strategic asymmetry of classical Go (corner, side, center) is a distance-to-\u2202 effect, not a \u03C7 effect.";
+    } else if (B.kind === "rp2") {
+      b = "\u03C7 = 1: like the disk \u2014 but closed. The projective plane is the sphere with antipodes identified, so its Euler characteristic is half the sphere's." +
+          (M ? " Check it on this very mesh: V \u2212 E + F = " + M.nV + " \u2212 " + M.nE + " + " + M.nF + " = " + (M.nV - M.nE + M.nF) + " (the doubly-flipped corner identifications collapse just enough edges to land on 1)." : "") +
+          " Odd \u03C7 on a closed surface is only possible without orientability \u2014 this board is the proof.";
     } else {
-      b = "\u03C7 = 0: the torus, M\u00F6bius band and Klein bottle are the flat surfaces." +
+      b = "\u03C7 = 0: the torus, cylinder, M\u00F6bius band and Klein bottle are the flat surfaces." +
           (M ? " Check it on this very mesh: V \u2212 E + F = " + M.nV + " \u2212 " + M.nE + " + " + M.nF + " = " + (M.nV - M.nE + M.nF) + "." : "") +
           " Zero Euler characteristic is exactly the condition under which perfectly regular lattices close up with no defects \u2014 which is why this board has no forced brass points (only the boundary, if any).";
     }
@@ -3687,7 +4138,11 @@ const EXPLAIN = {
   "act.new": () => ({ t: "new board",
     b: "Rebuilds the board from the current Surface \u00D7 Mesh \u00D7 Scale spec and starts a fresh game." }),
   "act.share": () => ({ t: "share \u2014 correspondence play",
-    b: "Produces a code (and URL) encoding this exact game: the board spec plus every move. Send it to your opponent; they load it, play a move, and send the new code back \u2014 remote Go on any topology, no server involved. Codes are validated on load by replaying every move through the rules engine, so a corrupted code fails loudly instead of silently." }),
+    b: "Produces a code (and URL) encoding this exact game: the board spec plus every move. Send it to your opponent; they load it, play a move, and send the new code back \u2014 remote Go on any topology, no server involved. Codes are validated on load by replaying every move through the rules engine, so a corrupted code fails loudly instead of silently. The same sheet downloads and loads <b>SGF</b> files: standard SGF on the classical board, generalized SGF (gSGF, the python package's JSON dialect) on every other topology." }),
+  "act.sgfdown": () => ({ t: "download SGF",
+    b: "Saves the current game as a file. On the classical board (plane, square mesh, stones on vertices) this is a standard <b>SGF</b> (FF[4]) that any Go tool opens. Every other board is beyond SGF's letter-pair grid coordinates, so those games download as <b>gSGF</b> \u2014 the generalized Smart Game Format: a JSON container whose board declaration is the spec (surface \u00D7 mesh \u00D7 size \u00D7 incidence) and whose moves are vertex ids. gSGF files replay here and in the python package (geodesics.gsgf) interchangeably." }),
+  "act.sgfload": () => ({ t: "load SGF",
+    b: "Opens a game file: a standard SGF (loaded onto the classical 9/13/19 board; setup and handicap stones are not supported yet) or a gSGF written by this page or the python package. Every move is replayed through the rules engine on load, so files that violate the rules \u2014 or name boards this page cannot build \u2014 fail with an explanation rather than a corrupted position." }),
   "sel.surface": () => ({ t: "surface",
     b: "The underlying manifold \u2014 which points exist and how the world wraps. Right-click the plate segments above the board for the mathematics of the current choice." }),
   "sel.mesh": () => ({ t: "mesh",
@@ -3969,11 +4424,31 @@ document.getElementById("newBtn").addEventListener("click", () => newBoard());
 document.getElementById("shareBtn").addEventListener("click", openShare);
 document.getElementById("shareCopy").addEventListener("click", copyShare);
 document.getElementById("shareLoad").addEventListener("click", () => {
-  const t = document.getElementById("shareIn").value;
-  if (t.trim()) {
+  const t = document.getElementById("shareIn").value.trim();
+  if (!t) return;
+  document.getElementById("shareModal").classList.remove("open");
+  // the load box is polyglot: a pasted SGF game tree or gSGF JSON works
+  // exactly like a share code (all three replay through the rules engine)
+  if (t[0] === "(" || t[0] === "{") loadSGFText(t);
+  else loadShare(t);
+});
+// SGF download: serialize the current game (classic SGF on the classical
+// board, gSGF everywhere else) and hand it to the browser as a file.
+document.getElementById("sgfDown").addEventListener("click", downloadSGF);
+// SGF load: the visible button proxies a hidden <input type=file>.
+document.getElementById("sgfLoadBtn").addEventListener("click",
+  () => document.getElementById("sgfFile").click());
+document.getElementById("sgfFile").addEventListener("change", e => {
+  const f = e.target.files && e.target.files[0];
+  if (!f) return;
+  const reader = new FileReader();
+  reader.onload = () => {
     document.getElementById("shareModal").classList.remove("open");
-    loadShare(t);
-  }
+    loadSGFText(String(reader.result));
+  };
+  reader.onerror = () => message("could not read " + f.name);
+  reader.readAsText(f);
+  e.target.value = "";           // allow re-picking the same file later
 });
 document.getElementById("shareClose").addEventListener("click",
   () => document.getElementById("shareModal").classList.remove("open"));
