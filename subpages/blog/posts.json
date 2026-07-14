@@ -1,5 +1,17 @@
 [
     {
+    "slug": "dec-and-topological-deep-learning",
+    "title": "Discrete Exterior Calculus and Topological Deep Learning: From Incidence Matrices to Hodge Decompositions, with Proofs",
+    "date": "2026-07-14",
+    "excerpt": "Building the discrete exterior derivative, codifferential, Hodge Laplacian, and Hodge decomposition by hand — with full proofs — and showing why standard graph neural networks are the rank-0 slice of a degree-typed calculus that makes conservation laws exact.",
+    "tags": [
+      "topology",
+      "machine learning",
+      "topological deep learning",
+      "graph neural networks"
+    ]
+},
+    {
 	"slug": "holonomy-aware_topological_alphazero",
 	"title": "Holonomy-Aware Topological AlphaZero: Learning to Play Go on Topological Abstractions",
 	"date": "2026-07-09",
