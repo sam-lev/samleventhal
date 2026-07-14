@@ -19,6 +19,11 @@
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Cormorant+Garamond:ital,wght@0,400;0,600;0,700;1,400&family=Source+Sans+3:wght@300;400;500;600&display=swap" rel="stylesheet">
 
+  <!-- KaTeX (math rendering) -->
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.css">
+  <script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.js"></script>
+  <script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/contrib/auto-render.min.js"></script>
+
   <style>
     :root {
       --color-bg: #faf9f7;
@@ -535,6 +540,24 @@
         .replace(/"/g, '&quot;').replace(/'/g, '&#39;');
     }
 
+    // Hide $...$ / $$...$$ from marked so backslashes and matrix row
+    // separators (\\) survive Markdown parsing; restore them afterward.
+    // Code spans are split out first so `$` inside code is left alone.
+    function renderMarkdownWithMath(md) {
+      if (!window.marked) return escapeHtml(md);
+      var stash = [];
+      function mask(m) { return '@@MATH' + (stash.push(m) - 1) + '@@'; }
+      var parts = md.split(/(```[\s\S]*?```|`[^`\n]*`)/g);
+      for (var i = 0; i < parts.length; i++) {
+        if (parts[i].charAt(0) === '`') continue;      // code — untouched
+        parts[i] = parts[i]
+          .replace(/\$\$[\s\S]+?\$\$/g, mask)          // display math first
+          .replace(/\$[^$\n]+?\$/g, mask);             // then inline math
+      }
+      var html = window.marked.parse(parts.join(''));
+      return html.replace(/@@MATH(\d+)@@/g, function (_, n) { return stash[+n]; });
+    }
+
     var MONTHS = ['January','February','March','April','May','June',
                   'July','August','September','October','November','December'];
 
@@ -602,7 +625,7 @@
         .then(function (md) {
           // Strip an optional --- front-matter block if present.
           md = md.replace(/^\s*---\n[\s\S]*?\n---\s*\n?/, '');
-          var html = window.marked ? window.marked.parse(md) : escapeHtml(md);
+          var html = renderMarkdownWithMath(md);
           bodyCache[slug] = html;
           return html;
         });
@@ -722,6 +745,15 @@
 
           html += '</article>';
           setMain(html);
+          if (window.renderMathInElement) {
+            renderMathInElement(mainEl, {
+              delimiters: [
+                { left: '$$', right: '$$', display: true },
+                { left: '$',  right: '$',  display: false }
+              ],
+              throwOnError: false
+            });
+          }
           document.title = p.title + ' — ' + BLOG.title;
         }).catch(function (err) {
           setMain(errorState(BLOG.postsDir + slug + '.md', err));
