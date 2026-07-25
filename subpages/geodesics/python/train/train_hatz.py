@@ -31,6 +31,57 @@ from mcts import MCTS, policy_target                                         # n
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 CKPT_DIR = os.path.join(HERE, "checkpoints")
+ROOT = os.path.dirname(os.path.dirname(HERE))
+
+
+def export_model_card(net, out_id, name=None):
+    """Write the trained HATZ net as a portable geo-model-1 CARD
+    (web/models/<id>.geomodel.json) and copy hatz.py + hgnn.py beside it.
+
+    In the browser the card is evaluated by the app's hatz runtime: a Web
+    Worker boots Pyodide (CPython on WebAssembly), fetches the two source
+    files named by the card's "code" field, rebuilds the net by assigning
+    net.p from the card's params — the exact inverse of this function —
+    and answers stateless genmove requests. Copying the sources into
+    web/models/ means a plain static host of the web/ directory serves
+    everything the runtime needs; a card published elsewhere can point its
+    "code" URLs at any host (or the page can pin them via
+    window.GEO_HATZ_CODE).
+    """
+    import json as _json
+    import shutil
+    mdir = os.path.join(ROOT, "web", "models")
+    os.makedirs(mdir, exist_ok=True)
+    for src in ("hatz.py", "hgnn.py"):        # the runtime's python sources
+        shutil.copyfile(os.path.join(HERE, src), os.path.join(mdir, src))
+    card = {
+        "format": "geo-model-1",
+        "arch": "hatz",
+        "id": out_id,
+        "name": name or ("HATZ " + out_id),
+        # "strong" needs MCTS + the rules engine; the in-browser runtime
+        # ships the raw policy levels only (the bridge serves strong)
+        "levels": ["casual", "standard"],
+        "supports": {
+            "surfaces": net.meta.get("surfaces"),
+            "meshes": net.meta.get("meshes"),
+            "incidence": net.meta.get("incidence") or ["vertices"],
+        },
+        "hidden": net.hidden,
+        "layers": net.layers,
+        "meta": net.meta,
+        "params": {k: v.tolist() for k, v in net.p.items()},
+        # fetched by the worker relative to the page; override per
+        # deployment with window.GEO_HATZ_CODE
+        "code": {"hatz": "models/hatz.py", "hgnn": "models/hgnn.py"},
+    }
+    path = os.path.join(mdir, f"{out_id}.geomodel.json")
+    with open(path, "w") as f:
+        _json.dump(card, f)
+    print(f"exported {path} (+ models/hatz.py, models/hgnn.py) — load it in "
+          f"the app's Models sheet, or link it: "
+          f"geodesics.html#model=<url-to-that-file>")
+    return path
 
 
 def self_play_game(net, key, boards, sims, seed, rng, gauge_aug,
@@ -137,6 +188,11 @@ def main():
     ap.add_argument("--seed", type=int, default=1)
     ap.add_argument("--checkpoint", default=os.path.join(CKPT_DIR,
                                                          "hatz.npz"))
+    ap.add_argument("--export-model", default=None, metavar="MODEL_ID",
+                    help="after training, also export a portable geo-model-1 "
+                         "CARD (web/models/<id>.geomodel.json) playable "
+                         "in-browser via the Pyodide runtime — no server, "
+                         "no rebuild; share it as a #model=<url> link")
     args = ap.parse_args()
 
     keys = LOWEST if args.specs == "lowest" else args.specs.split(",")
@@ -223,6 +279,8 @@ def main():
         print(line, flush=True)
     net.save(args.checkpoint)
     print(f"saved {args.checkpoint} — bridge bot bots/hatz_mini.py serves it")
+    if args.export_model:
+        export_model_card(net, args.export_model)
 
 
 if __name__ == "__main__":

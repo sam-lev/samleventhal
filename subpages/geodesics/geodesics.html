@@ -64,9 +64,19 @@
   #panelClose { position: absolute; top: 8px; right: 10px; border: none;
     background: none; color: var(--ink); font-size: 18px; padding: 2px 8px; }
 
-  #shareModal { position: fixed; inset: 0; z-index: 60; display: none;
+  #shareModal, .modal { position: fixed; inset: 0; z-index: 60; display: none;
     background: rgba(8,10,14,.72); align-items: center; justify-content: center; }
-  #shareModal.open { display: flex; }
+  #shareModal.open, .modal.open { display: flex; }
+  .sheet code { font: 11.5px/1.4 ui-monospace, Menlo, monospace;
+    color: var(--jade); }
+  #modelsList { margin: 6px 0; font-size: 13px; color: var(--bone); }
+  #modelsList .mrow { display: flex; align-items: baseline; gap: 8px;
+    padding: 3px 0; border-bottom: 1px dotted var(--line); }
+  #modelsList .mname { flex: 1; }
+  #modelsList .march { color: var(--ink); font-size: 12px; }
+  #modelsList button { padding: 2px 8px; font-size: 12px; }
+  #modelsClose { position: absolute; top: 8px; right: 10px; border: none;
+    background: none; color: var(--ink); font-size: 18px; padding: 2px 8px; }
   .sheet { background: var(--panel); border: 1px solid var(--line);
     border-radius: 12px; width: min(520px, calc(100vw - 28px));
     padding: 16px 18px; position: relative; }
@@ -105,6 +115,7 @@
     <button id="passBtn" class="info" data-info="act.pass">Pass</button>
     <button id="undoBtn" class="info" data-info="act.undo">Undo</button>
     <button id="shareBtn" class="info" data-info="act.share">Share</button>
+    <button id="modelsBtn" class="info" data-info="act.models">Models</button>
     <select id="paint" class="info" data-info="opt.paint" aria-label="Paint"></select>
     <label class="toggle info" data-info="opt.passalive">
       <input type="checkbox" id="paToggle"> pass-alive
@@ -124,6 +135,28 @@
   <button id="panelClose" aria-label="Close">&times;</button>
   <div id="panelTitle"></div>
   <div id="panelBody"></div>
+</div>
+
+<div id="modelsModal" class="modal">
+  <div class="sheet">
+    <button id="modelsClose" aria-label="Close">&times;</button>
+    <h3>Models</h3>
+    <p>Load a trained network as a <b>model card</b> &mdash; a single JSON
+       file written by <code>train_zero.py --export-model</code> or
+       <code>train_hatz.py --export-model</code>. Only weights are loaded,
+       never code: the card names one of this page's built-in runtimes.
+       Loaded models appear in the Opponent menu; links of the form
+       <code>#model=&lt;url&gt;</code> load automatically.</p>
+    <div id="modelsList"></div>
+    <div class="row">
+      <button id="modelFileBtn">Load model file&hellip;</button>
+      <input type="file" id="modelFile" accept=".json,.geomodel,application/json"
+             hidden aria-label="Model card file">
+    </div>
+    <p style="margin-top:12px">Or fetch a card from a URL:</p>
+    <input id="modelURL" placeholder="https://&hellip;/model.geomodel.json">
+    <div class="row"><button id="modelURLBtn">Fetch</button></div>
+  </div>
 </div>
 
 <div id="shareModal">
@@ -2009,6 +2042,569 @@ if (typeof module !== "undefined") {
 
 </script>
 <script>
+/*! GeoModels v0.1 — portable model cards for Geodesics.
+ *
+ * A model is DATA, not code: a single self-describing JSON "card"
+ *
+ *   { "format": "geo-model-1",          the schema tag (required)
+ *     "arch":   "zero" | "hatz",        which shipped RUNTIME evaluates it
+ *     "id":     "zero-all",             unique; re-loading replaces
+ *     "name":   "Zero (all surfaces)",  shown in the Opponent menu
+ *     "levels": ["casual", "standard"], strength names
+ *     "supports": { surfaces:[..], meshes:[..], incidence:[..],
+ *                   scaleIdx:[..] } | null,      board whitelist (null = any)
+ *     "hidden": 32, "layers": 3,        architecture shape
+ *     "meta":   { ... },                training provenance (informational)
+ *     "params": { name: nested lists }, the weights themselves
+ *     "code":   { hatz: url, hgnn: url } }       (hatz cards only, see below)
+ *
+ * Cards are produced by the training scripts (train_zero.py --export-model,
+ * train_hatz.py --export-model) and can be loaded three ways in the app:
+ * picked as a file, fetched from a pasted URL, or auto-fetched from a
+ * #model=<url> link — which is the whole phone story: tap a link, the model
+ * appears in the Opponent menu.
+ *
+ * SECURITY MODEL. Only weights are ever loaded, never JavaScript: the
+ * "arch" field dispatches to a runtime that shipped WITH this page. An
+ * untrusted card can at worst supply bad numbers; the app's pickMove path
+ * already degrades malformed replies to a pass, never to a corrupted board.
+ * (The one nuance is the hatz runtime, which fetches the two *published*
+ * python source files named by the card into a sandboxed WebAssembly
+ * interpreter — see the hatz section below for why that is still
+ * weights-shaped trust, and how to pin the sources.)
+ *
+ * RUNTIMES.
+ *   zero   pure JavaScript. The graph-net forward pass below mirrors
+ *          python/train/zeronet.py line for line (it is the same code that
+ *          train_zero.py used to inline into every exported model; now it
+ *          lives here once and models are data).
+ *   hatz   the real python. HATZ's forward pass (Kruskal sweeps,
+ *          persistence pairing, Morse routing) has data-dependent control
+ *          flow that no tensor-graph export survives, so instead of a
+ *          drift-prone JS port the runtime runs hatz.py itself in a Web
+ *          Worker under Pyodide (CPython compiled to WebAssembly): exact
+ *          training parity, zero porting, zero server. First use lazily
+ *          downloads the interpreter (~10-20 MB, cached by the browser
+ *          thereafter); boards here are <= a few hundred sites, so per-move
+ *          latency stays comfortable even on a phone.
+ *
+ * No dependencies. Browser: window.GeoModels. Node: module.exports (the
+ * zero runtime and all validation are testable headlessly; the hatz
+ * runtime requires Worker/fetch and reports itself unavailable without
+ * them rather than throwing).
+ */
+(function (root, factory) {
+  if (typeof module === "object" && module.exports) module.exports = factory();
+  else root.GeoModels = factory();
+})(typeof self !== "undefined" ? self : this, function () {
+  "use strict";
+
+  const FORMAT = "geo-model-1";
+
+  // ---------------------------------------------------------------------
+  // small helpers
+  // ---------------------------------------------------------------------
+
+  // Is x a rectangular numeric matrix of shape [rows][cols]?
+  function isMatrix(x, rows, cols) {
+    if (!Array.isArray(x) || x.length !== rows) return false;
+    for (const r of x)
+      if (!Array.isArray(r) || r.length !== cols ||
+          r.some(v => typeof v !== "number" || !isFinite(v))) return false;
+    return true;
+  }
+  function isVector(x, n) {
+    return Array.isArray(x) && x.length === n &&
+           x.every(v => typeof v === "number" && isFinite(v));
+  }
+
+  // ---------------------------------------------------------------------
+  // runtime: zero — the graph policy/value net, natively in JS
+  // ---------------------------------------------------------------------
+  // Forward pass identical to python/train/zeronet.py (and to the model
+  // template train_zero.py previously inlined per export): five input
+  // features per vertex -> D hidden, L rounds of self+mean-neighbor message
+  // passing, then a per-vertex policy head, a global pass logit and a tanh
+  // value head, masked softmax over n+1 actions (index n = pass).
+
+  function zeroForward(card, adj, stones, toMove, mask) {
+    const P = card.params, L = card.layers, D = card.hidden;
+    const n = adj.length;
+    let md = 1;                                  // max degree, for the
+    for (let v = 0; v < n; v++)                  // normalized degree feature
+      md = Math.max(md, adj[v].length);
+    let H = new Array(n);                        // features -> first layer
+    for (let v = 0; v < n; v++) {
+      const c = stones[v];
+      const x = [c === toMove ? 1 : 0,           // own stone
+                 (c && c !== toMove) ? 1 : 0,    // opponent stone
+                 c === 0 ? 1 : 0,                // empty
+                 adj[v].length / md,             // relative degree
+                 1];                             // bias channel
+      const h = new Float64Array(D);
+      for (let j = 0; j < D; j++) {
+        let s = P.b0[j];
+        for (let i = 0; i < 5; i++) s += x[i] * P.W0[i][j];
+        h[j] = s > 0 ? s : 0;                    // ReLU
+      }
+      H[v] = h;
+    }
+    for (let l = 0; l < L; l++) {                // message-passing rounds
+      const Ws = P["Ws" + l], Wn = P["Wn" + l], b = P["b" + (l + 1)];
+      const AH = new Array(n);                   // mean over neighbors
+      for (let v = 0; v < n; v++) {
+        const m = new Float64Array(D), a = adj[v];
+        for (let k = 0; k < a.length; k++) {
+          const hu = H[a[k]];
+          for (let j = 0; j < D; j++) m[j] += hu[j];
+        }
+        if (a.length) for (let j = 0; j < D; j++) m[j] /= a.length;
+        AH[v] = m;
+      }
+      const H2 = new Array(n);                   // self + neighbor mix
+      for (let v = 0; v < n; v++) {
+        const h = new Float64Array(D);
+        for (let j = 0; j < D; j++) {
+          let s = b[j];
+          for (let i = 0; i < D; i++)
+            s += H[v][i] * Ws[i][j] + AH[v][i] * Wn[i][j];
+          h[j] = s > 0 ? s : 0;
+        }
+        H2[v] = h;
+      }
+      H = H2;
+    }
+    const g = new Float64Array(D);               // global mean readout
+    for (let v = 0; v < n; v++)
+      for (let j = 0; j < D; j++) g[j] += H[v][j] / n;
+    const logits = new Float64Array(n + 1);
+    for (let v = 0; v < n; v++) {                // per-vertex policy head
+      let s = P.bp[0];
+      for (let j = 0; j < D; j++) s += H[v][j] * P.wp[j];
+      logits[v] = s;
+    }
+    let pl = P.bq[0], u = P.bv[0];               // pass logit + value head
+    for (let j = 0; j < D; j++) { pl += g[j] * P.wq[j]; u += g[j] * P.wv[j]; }
+    logits[n] = pl;
+    let mx = -Infinity;                          // masked softmax
+    for (let i = 0; i <= n; i++) if (mask[i]) mx = Math.max(mx, logits[i]);
+    let Z = 0;
+    const probs = new Float64Array(n + 1);
+    for (let i = 0; i <= n; i++) {
+      probs[i] = mask[i] ? Math.exp(logits[i] - mx) : 0;
+      Z += probs[i];
+    }
+    for (let i = 0; i <= n; i++) probs[i] /= Z || 1;
+    return { probs, value: Math.tanh(u) };
+  }
+
+  const zeroRuntime = {
+    // Structural validation: every named parameter must exist with the
+    // shape the forward pass will index, so a truncated or hand-edited
+    // card fails at load time with a message, not mid-game with NaNs.
+    validate(card) {
+      const D = card.hidden, L = card.layers, P = card.params;
+      if (!Number.isInteger(D) || D < 1 || !Number.isInteger(L) || L < 0)
+        return "hidden/layers must be positive integers";
+      if (!P || typeof P !== "object") return "missing params";
+      if (!isMatrix(P.W0, 5, D) || !isVector(P.b0, D))
+        return "input layer W0/b0 has the wrong shape";
+      for (let l = 0; l < L; l++)
+        if (!isMatrix(P["Ws" + l], D, D) || !isMatrix(P["Wn" + l], D, D) ||
+            !isVector(P["b" + (l + 1)], D))
+          return "message-passing layer " + l + " has the wrong shape";
+      for (const [w, b] of [["wp", "bp"], ["wq", "bq"], ["wv", "bv"]])
+        if (!isVector(P[w], D) || !isVector(P[b], 1))
+          return "head " + w + "/" + b + " has the wrong shape";
+      return null;
+    },
+    // create() has the same contract as every GeoAI model entry: it is
+    // handed the adjacency lists and returns { pickMove }. `hooks` is
+    // unused here — the zero net reads nothing but the graph.
+    create(card, neighbors, opts /* , hooks */) {
+      const level = (opts && opts.level) || "standard";
+      return {
+        pickMove(stones, color, o) {
+          const n = neighbors.length;
+          const legal = (o && o.legalMask) || null;
+          const mask = new Uint8Array(n + 1);
+          mask[n] = 1;                            // passing is always legal
+          for (let v = 0; v < n; v++)
+            if (stones[v] === 0 && (!legal || legal[v])) mask[v] = 1;
+          const { probs, value } = zeroForward(card, neighbors, stones,
+                                               color, mask);
+          let a = n;
+          if (level === "casual") {               // sample the raw policy
+            let r = Math.random();
+            for (let i = 0; i <= n; i++) { r -= probs[i]; if (r <= 0) { a = i; break; } }
+          } else {                                // argmax
+            let best = -1;
+            for (let i = 0; i <= n; i++)
+              if (probs[i] > best) { best = probs[i]; a = i; }
+          }
+          return { move: a === n ? -1 : a,
+                   value, reason: "zero policy v" + value.toFixed(2) };
+        },
+      };
+    },
+  };
+
+  // ---------------------------------------------------------------------
+  // runtime: hatz — python-in-the-browser via a Pyodide Web Worker
+  // ---------------------------------------------------------------------
+  // Lifecycle: ONE worker per page, created lazily the first time a HATZ
+  // opponent actually has to move (so the base page pays nothing).
+  // Boot sequence, all inside the worker: import the Pyodide loader from
+  // its CDN, initialize the WebAssembly interpreter, install numpy, fetch
+  // the two published source files (hatz.py, hgnn.py) named by the card
+  // and write them into the interpreter's virtual filesystem, then run a
+  // small glue script (below) that knows how to register cards and answer
+  // genmove requests. Cards register their weights by rebuilding a HATZ
+  // instance and assigning net.p — the exact inverse of --export-model.
+  //
+  // The protocol is deliberately the bridge protocol's shape: stateless
+  // genmove requests carrying the whole position, so the worker (like a
+  // bridge bot) can never desynchronize from the page, and Bundles are
+  // cached inside python keyed by (surface, adjacency) since they are pure
+  // functions of the board.
+  //
+  // Trust note: the card's code URLs decide WHICH hatz.py runs. That is
+  // still weights-shaped trust in practice — the interpreter is sandboxed
+  // WebAssembly inside a Worker with no DOM access, and its only output is
+  // a move index that the host rules re-validate — but a deployment that
+  // wants to pin the sources can set window.GEO_HATZ_CODE and cards'
+  // "code" fields are then ignored.
+
+  const PYODIDE_URL_DEFAULT = "https://cdn.jsdelivr.net/pyodide/v0.26.4/full/";
+
+  // Python glue, executed once inside the worker after hatz.py / hgnn.py
+  // are on the virtual filesystem. Kept as a plain string so this module
+  // stays a single dependency-free file.
+  const HATZ_GLUE = [
+    "import json",
+    "import numpy as np",
+    "from types import SimpleNamespace",
+    "import hatz",
+    "",
+    "NETS = {}      # model id -> HATZ instance",
+    "BUNDLES = {}   # (surface, adjacency-json) -> Bundle (pure board data)",
+    "",
+    "def register(card_json):",
+    "    # Rebuild a HATZ net from a geo-model card: fresh architecture,",
+    "    # then overwrite every parameter array (the inverse of",
+    "    # train_hatz.py --export-model).",
+    "    c = json.loads(card_json)",
+    "    net = hatz.HATZ(hidden=int(c['hidden']), layers=int(c['layers']))",
+    "    for k in net.p:",
+    "        if k not in c['params']:",
+    "            raise ValueError('card is missing parameter ' + k)",
+    "        w = np.asarray(c['params'][k], dtype=float)",
+    "        if w.shape != net.p[k].shape:",
+    "            raise ValueError('parameter %s has shape %s, expected %s'",
+    "                             % (k, w.shape, net.p[k].shape))",
+    "        net.p[k] = w",
+    "    net.meta = c.get('meta', {})",
+    "    NETS[c['id']] = net",
+    "    return 'ok'",
+    "",
+    "def _bundle(surface, neighbors, nx, ny, faces, coords):",
+    "    # Bundles are static per board; cache them. When the page supplies",
+    "    # the mesh's face list and coordinates the Bundle here is",
+    "    # IDENTICAL to the one training built (face ranks, face-based",
+    "    # orientation cocycle, curvature) — the web app's faces are",
+    "    # verified face-for-face against python topology. Without them we",
+    "    # fall back to synthesizing grid coordinates from nx/ny, which is",
+    "    # still enough for the name-based cocycle to place the",
+    "    # Mobius/Klein/RP2 seam (the bridge bots' trick).",
+    "    key = (surface or '', len(faces or []), json.dumps(neighbors))",
+    "    if key not in BUNDLES:",
+    "        n = len(neighbors)",
+    "        if coords is None and nx and ny:",
+    "            coords = [(v % nx, v // nx) for v in range(n)]",
+    "        board = SimpleNamespace(name=surface or 'remote', n=n,",
+    "                                adj=[tuple(a) for a in neighbors],",
+    "                                coords=coords,",
+    "                                faces=[tuple(f) for f in faces]",
+    "                                      if faces else None,",
+    "                                params={}, meta={})",
+    "        BUNDLES[key] = hatz.Bundle(board, surface)",
+    "    return BUNDLES[key]",
+    "",
+    "def genmove(req_json):",
+    "    # Stateless, bridge-shaped: the request carries the entire",
+    "    # position. Returns {move, value, reason}; move -1 is a pass.",
+    "    r = json.loads(req_json)",
+    "    net = NETS[r['model']]",
+    "    nbrs = r['neighbors']",
+    "    n = len(nbrs)",
+    "    stones = list(r['stones'])",
+    "    legal = r.get('legalMask') or [1] * n",
+    "    mask = np.zeros(n + 1)",
+    "    mask[n] = 1",
+    "    for v in range(n):",
+    "        if stones[v] == 0 and legal[v]:",
+    "            mask[v] = 1",
+    "    bundle = _bundle(r.get('surface'), nbrs, r.get('nx', 0),",
+    "                     r.get('ny', 0), r.get('faces'), r.get('coords'))",
+    "    probs, value = net.policy_value(bundle, stones, r['toMove'], mask)",
+    "    probs = probs * mask",
+    "    if probs.sum() <= 0:",
+    "        return json.dumps({'move': -1, 'value': 0.0,",
+    "                           'reason': 'HATZ passes'})",
+    "    if r.get('level') == 'casual':",
+    "        probs = probs / probs.sum()",
+    "        a = int(np.random.default_rng().choice(n + 1, p=probs))",
+    "    else:",
+    "        a = int(np.argmax(probs))",
+    "    tag = ' \\u00b7 non-orientable seam active' \\",
+    "        if bundle.nonorientable else ''",
+    "    return json.dumps({'move': -1 if a == n else a,",
+    "                       'value': float(value),",
+    "                       'reason': 'HATZ policy, value %+.2f%s'",
+    "                                 % (value, tag)})",
+  ].join("\n");
+
+  // The worker's own JavaScript, instantiated from a Blob URL so the
+  // single-file build needs no separate worker asset. It boots Pyodide on
+  // the first message, then answers {register} and {genmove} requests;
+  // every reply carries the request id so the page can match promises.
+  function hatzWorkerSource() {
+    return [
+      "let pyodide = null, booted = null;",
+      "async function boot(cfg) {",
+      "  importScripts(cfg.pyodideURL + 'pyodide.js');",
+      "  pyodide = await loadPyodide({ indexURL: cfg.pyodideURL });",
+      "  await pyodide.loadPackage('numpy');",
+      "  for (const [name, url] of Object.entries(cfg.code)) {",
+      "    const resp = await fetch(url);",
+      "    if (!resp.ok) throw new Error('fetch ' + url + ': ' + resp.status);",
+      "    pyodide.FS.writeFile(name + '.py', await resp.text());",
+      "  }",
+      "  pyodide.runPython(cfg.glue);",
+      "}",
+      "onmessage = async (e) => {",
+      "  const m = e.data;",
+      "  try {",
+      "    if (m.type === 'boot') {",
+      "      booted = boot(m.cfg);",
+      "      await booted;",
+      "      postMessage({ type: 'ready', id: m.id });",
+      "      return;",
+      "    }",
+      "    await booted;                       // queue behind the boot",
+      "    if (m.type === 'register') {",
+      "      pyodide.globals.get('register')(JSON.stringify(m.card));",
+      "      postMessage({ type: 'registered', id: m.id });",
+      "    } else if (m.type === 'genmove') {",
+      "      const out = pyodide.globals.get('genmove')(JSON.stringify(m.req));",
+      "      postMessage({ type: 'move', id: m.id, result: JSON.parse(out) });",
+      "    }",
+      "  } catch (err) {",
+      "    postMessage({ type: 'error', id: m.id,",
+      "                  message: String(err && err.message || err) });",
+      "  }",
+      "};",
+    ].join("\n");
+  }
+
+  // Page-side worker handle: lazy singleton + promise-per-request table.
+  const hz = { worker: null, next: 1, pending: new Map(),
+               registered: new Set() };
+
+  function hatzAvailable() {
+    return typeof Worker !== "undefined" && typeof Blob !== "undefined" &&
+           typeof URL !== "undefined" && typeof fetch !== "undefined";
+  }
+
+  // Send one message and get one matching reply as a promise. The timeout
+  // is generous on the first call (the interpreter download) and normal
+  // afterwards; a timed-out or crashed worker rejects, which the app's
+  // aiMove path turns into "AI unavailable — your move".
+  function hzCall(msg, timeoutMs) {
+    return new Promise((resolve, reject) => {
+      const id = hz.next++;
+      hz.pending.set(id, { resolve, reject });
+      hz.worker.postMessage({ ...msg, id });
+      setTimeout(() => {
+        if (hz.pending.has(id)) {
+          hz.pending.delete(id);
+          reject(new Error("python runtime timeout"));
+        }
+      }, timeoutMs);
+    });
+  }
+
+  function hzEnsureWorker(card) {
+    if (hz.worker) return;
+    const url = URL.createObjectURL(
+      new Blob([hatzWorkerSource()], { type: "text/javascript" }));
+    hz.worker = new Worker(url);
+    hz.worker.onmessage = (e) => {
+      const m = e.data;
+      const p = hz.pending.get(m.id);
+      if (!p) return;
+      hz.pending.delete(m.id);
+      if (m.type === "error") p.reject(new Error(m.message));
+      else p.resolve(m.result);
+    };
+    hz.worker.onerror = (e) => {           // catastrophic: fail everything
+      for (const p of hz.pending.values())
+        p.reject(new Error(e.message || "python runtime crashed"));
+      hz.pending.clear();
+    };
+    // Source pinning: a page-level override beats the card (deployments
+    // that host their own hatz.py/hgnn.py set window.GEO_HATZ_CODE).
+    const pageCode = (typeof self !== "undefined" && self.GEO_HATZ_CODE) ||
+                     null;
+    const code = pageCode || card.code ||
+                 { hatz: "models/hatz.py", hgnn: "models/hgnn.py" };
+    const pyodideURL = (typeof self !== "undefined" && self.GEO_PYODIDE_URL)
+                       || card.pyodide || PYODIDE_URL_DEFAULT;
+    // fire-and-forget: replies to later calls queue behind the boot
+    hzCall({ type: "boot", cfg: { pyodideURL, code, glue: HATZ_GLUE } },
+           300000).catch(() => { /* surfaced by the first genmove */ });
+  }
+
+  const hatzRuntime = {
+    validate(card) {
+      if (!hatzAvailable())
+        return "this environment has no Worker/fetch (python runtime " +
+               "unavailable)";
+      if (!Number.isInteger(card.hidden) || !Number.isInteger(card.layers))
+        return "hidden/layers must be integers";
+      if (!card.params || typeof card.params !== "object")
+        return "missing params";
+      // Shape-checking HATZ's ~30 parameter tensors client-side would
+      // duplicate the python constructor; register() inside the worker
+      // does it exactly (against the real shapes) and its error message
+      // is surfaced on the first move instead.
+      return null;
+    },
+    create(card, neighbors, opts, hooks) {
+      hzEnsureWorker(card);
+      // Register lazily and only once per model id; the promise is shared
+      // so concurrent games on the same model do not double-register.
+      if (!hz.registered.has(card.id)) {
+        hz.registered.add(card.id);
+        hz.regPromise = hzCall({ type: "register", card }, 300000)
+          .catch((e) => { hz.registered.delete(card.id); throw e; });
+      }
+      const level = (opts && opts.level) || "standard";
+      return {
+        pickMove(stones, color, o) {
+          // The cocycle needs to know which surface it is on and, for
+          // grid boards, the nx/ny lattice shape — the app supplies both
+          // through the hooks it passed to install() (loader.js itself
+          // never reads app state).
+          const info = (hooks && hooks.boardInfo && hooks.boardInfo()) || {};
+          const req = {
+            model: card.id, level,
+            surface: info.surface || null,
+            nx: info.nx || 0, ny: info.ny || 0,
+            // mesh faces + coordinates when the page has them: with these
+            // the worker's Bundle matches the training Bundle exactly
+            faces: info.faces || null,
+            coords: info.coords || null,
+            neighbors,
+            stones: Array.from(stones),
+            toMove: color,
+            legalMask: Array.from((o && o.legalMask) || []),
+          };
+          return (hz.regPromise || Promise.resolve())
+            .then(() => hzCall({ type: "genmove", req }, 300000));
+        },
+      };
+    },
+  };
+
+  const runtimes = { zero: zeroRuntime, hatz: hatzRuntime };
+
+  // ---------------------------------------------------------------------
+  // validation + installation
+  // ---------------------------------------------------------------------
+
+  // Structural check of a parsed card. Returns an error string (for the
+  // UI) or null when the card is sound.
+  function validate(card) {
+    if (!card || typeof card !== "object") return "not a JSON object";
+    if (card.format !== FORMAT)
+      return "not a " + FORMAT + " card (format: " +
+             JSON.stringify(card.format) + ")";
+    if (!runtimes[card.arch])
+      return "unknown architecture '" + card.arch + "' (this page ships: " +
+             Object.keys(runtimes).join(", ") + ")";
+    if (typeof card.id !== "string" || !card.id || card.id.includes(":"))
+      return "card needs a string id without ':'";
+    if (card.supports !== undefined && card.supports !== null &&
+        typeof card.supports !== "object")
+      return "supports must be an object or null";
+    return runtimes[card.arch].validate(card);
+  }
+
+  // Install a validated card into a GeoAI.models registry. `hooks` are
+  // app-supplied callbacks runtimes may need (currently boardInfo() for
+  // the hatz cocycle). Re-installing an id replaces the previous entry, so
+  // "load a newer checkpoint" is just loading again. Returns the entry.
+  function install(card, GeoAI, hooks) {
+    const err = validate(card);
+    if (err) throw new Error(err);
+    const entry = {
+      id: card.id,
+      name: card.name || card.id,
+      levels: (card.levels && card.levels.length) ? card.levels
+                                                  : ["standard"],
+      supports: card.supports || null,
+      loaded: true,                    // marks user-loaded (listable) models
+      arch: card.arch,
+      create: (neighbors, opts) =>
+        runtimes[card.arch].create(card, neighbors, opts, hooks || {}),
+    };
+    const i = GeoAI.models.findIndex(m => m.id === entry.id);
+    if (i >= 0) GeoAI.models.splice(i, 1, entry);
+    else GeoAI.models.push(entry);
+    return entry;
+  }
+
+  // Parse card text (from a file or textarea). Throws with a message the
+  // UI can show verbatim.
+  function fromText(text) {
+    let card;
+    try { card = JSON.parse(text); }
+    catch (e) { throw new Error("not valid JSON: " + e.message); }
+    const err = validate(card);
+    if (err) throw new Error(err);
+    return card;
+  }
+
+  // Fetch a card by URL (the #model= path). Only http(s) is followed.
+  async function fromURL(url) {
+    if (!/^https?:\/\//i.test(url))
+      throw new Error("model URLs must be http(s)");
+    const resp = await fetch(url);
+    if (!resp.ok) throw new Error("fetch failed: HTTP " + resp.status);
+    return fromText(await resp.text());
+  }
+
+  // The user-loaded entries currently installed (for the Models sheet).
+  function list(GeoAI) { return GeoAI.models.filter(m => m.loaded); }
+
+  // Remove a loaded model by id. Returns true when something was removed.
+  function remove(GeoAI, id) {
+    const i = GeoAI.models.findIndex(m => m.loaded && m.id === id);
+    if (i < 0) return false;
+    GeoAI.models.splice(i, 1);
+    return true;
+  }
+
+  return { version: "0.1.0", FORMAT, runtimes, validate, install,
+           fromText, fromURL, list, remove,
+           // internal, exposed for the headless test suite: the exact
+           // python glue the worker runs, testable under plain CPython
+           _hatzGlue: HATZ_GLUE };
+});
+
+</script>
+<script>
 // ---- models/hgnn-medium.js ----
 (function () {
 const WEIGHTS = {
@@ -2319,6 +2915,358 @@ GeoAI.models.push({
     return e;
   },
 });
+
+})();
+// ---- models/loader.js ----
+(function () {
+const WEIGHTS = null;
+# Geodesics — training, loading, and playing every model
+
+Two independent things happen to every model: it is **trained** (once, in
+Python), and it is **deployed** so the app can play it. There are two
+deployment channels, and most models can use either:
+
+| Channel | Runs where | Entry point | Cost / strength | Needs a server? |
+|---|---|---|---|---|
+| **Online** | in the browser, compiled into `geodesics.html` | `web/models/<id>.js` (+ `.weights.json`), bundled by `node build.mjs` | light — policy + shallow lookahead; no deep search | no |
+| **Bridge** | local Python, over WebSocket | `bridge/bots/<id>.py` exposing `BOT`, served by `python3 bridge/serve.py` | heavy — can run full PUCT/MCTS at many sims | yes (`serve.py`) |
+
+The same trained weights can usually be shipped **both** ways. Which channel
+is a model's *native* home is just a matter of weight — a graph net small
+enough to hand-port to JS lives online; one that needs MCTS or expensive
+pooling lives on the bridge.
+
+### Model zoo at a glance
+
+| Model | Trained by | Bridge | Online | Native home |
+|---|---|---|---|---|
+| **HGNN** — hierarchical Morse–Smale GNN | CEM, `train_hgnn.py` | drop-in bot (below) | ✅ `ai.js` built-in + trained `hgnn-*.js` | **Online** |
+| **Zero** — AlphaZero-method graph net | SGD self-play, `train_zero.py` | ✅ `zero_mini.py` | ✅ `--export-web` | **Both** |
+| **HATZ** — holonomy-aware topological AZ | SGD self-play, `train_hatz.py` / `train_hatz_vs.py` | ✅ `hatz_mini.py` | ✖ not shipped (see §HATZ) | **Bridge** |
+| **KataGo** — external CNN engine | not trained here | ✅ `katago*.py` | ✖ impossible (rectangles only) | **Bridge only** |
+| **Random** | — | ✅ `random_bot.py` (`py-random`) | ✅ `random.js` | **Both** |
+
+Repository layout referenced throughout:
+
+```
+geodesics/
+├── geodesics.html            # the built app (open with file://)
+├── python/train/             # all training; run commands from here
+│   ├── train_hgnn.py  train_zero.py  train_hatz.py  train_hatz_vs.py
+│   ├── hgnn.py  zeronet.py  hatz.py  mcts.py  env.py
+│   └── checkpoints/          # *.npz land here
+├── web/                      # run `node build.mjs` from here
+│   ├── build.mjs  shell.html  core.js  cells.js  ai.js  app.js
+│   └── models/               # <id>.js + <id>.weights.json (online models)
+└── bridge/                   # run `python3 serve.py` from here
+    ├── serve.py  analysis.cfg
+    ├── bots/                 # <id>.py exposing BOT (bridge models)
+    └── nets/                 # KataGo *.bin.gz networks
+```
+
+---
+
+## How loading & playing works (the 30-second version)
+
+**Online.** `node build.mjs ../geodesics.html` (run in `web/`) inlines
+`shell.html` + the four core modules + every `web/models/*.js`, each wrapped
+with its sibling `<id>.weights.json` as a `WEIGHTS` constant. Each model file
+calls `GeoAI.models.push({ id, name, levels, create })`. The app reads that
+registry straight into the Opponent menu and runs the chosen engine
+client-side — no network, works from a `file://` open. The built-in
+`ai.js` engine (`id: "hgnn1"`) is always present even with no trained models.
+
+**Bridge.** `python3 bridge/serve.py` imports every `bridge/bots/*.py`,
+registers each module-level `BOT`, and listens on `ws://127.0.0.1:8765`. Open
+`geodesics.html`; the app connects, calls `{"type":"hello"}`, and adds every
+advertised bot to the menu ("bridge connected — N engines"). Each move it
+sends a **stateless** `genmove` request — full stones, host-computed legal
+mask, move history, and the adjacency list of the current play graph — and
+the bot returns one site index (or `-1` to pass). The app re-validates every
+move with its own rules engine, so a bot can never make an illegal move.
+Stop `serve.py` and the bridge bots quietly vanish from the menu.
+
+A bot hides itself (`available()` → `False`) when its weights or binary are
+missing, and gates itself to boards it understands via
+`supports = {"surfaces":[…], "meshes":[…], "incidence":[…]}` (omitted list =
+"any"). The full annotated contract is `bridge/bots/random_bot.py`.
+
+---
+
+## HGNN — online-native, bridgeable
+
+The hierarchical Morse–Smale graph engine. Its ~35 scalar weights are
+optimized by a **cross-entropy method** (derivative-free: `pick_move`
+contains argmax lookahead, so there is nothing to differentiate). `hgnn.py`
+is the Python twin of the browser's `ai.js`, verified move-for-move.
+
+**Train** (one instance per topology, or one across a pool):
+
+```bash
+cd python/train
+
+# a sphere specialist
+python3 train_hgnn.py --boards sphere --generations 60 --out hgnn-sphere
+
+# one model across all lowest-complexity boards
+python3 train_hgnn.py --boards lowest --generations 80 --out hgnn-all
+
+# a Möbius/Klein/RP² non-orientable specialist
+python3 train_hgnn.py --boards mobius,klein,rp2 --generations 80 --out hgnn-nonor
+```
+
+`--out <id>` writes `web/models/<id>.weights.json` + `<id>.js`. Omit `--out`
+to just watch the fitness-vs-default curve without exporting.
+
+**Play online** (its native channel):
+
+```bash
+cd web
+node build.mjs ../geodesics.html      # bundles web/models/hgnn-*.js
+```
+
+Reopen `geodesics.html` → the Opponent menu now lists **HGNN sphere**, **HGNN
+all**, etc. (trained models ship at the `standard` level). The always-present
+**Hierarchical GNN** (`hgnn1`, hand-tuned Go priors, no training) offers
+`casual` / `standard` / `strong`, where `strong` adds top-14 1-ply lookahead.
+
+**Play over the bridge** (same engine, run in Python instead of compiled into
+the page — handy for parity checks or serving without a rebuild). This bot
+isn't in the repo by default; drop in `bridge/bots/hgnn_bridge.py`:
+
+```python
+"""bots/hgnn_bridge.py — serve the HGNN Python engine (hgnn.py) over the
+bridge. HGNN_WEIGHTS points at any web/models/<id>.weights.json from
+train_hgnn.py; with none it serves the built-in Go-prior weights."""
+import json, os, sys
+
+HERE = os.path.dirname(os.path.abspath(__file__))
+TRAIN = os.path.join(os.path.dirname(os.path.dirname(HERE)), "python", "train")
+if TRAIN not in sys.path:
+    sys.path.insert(0, TRAIN)
+WEIGHTS_PATH = os.environ.get("HGNN_WEIGHTS", "")
+
+
+class HGNNBot:
+    id = "hgnn"
+    name = "HGNN (bridge)"
+    levels = ["casual", "standard", "strong"]
+    supports = None                          # plays every board
+
+    def __init__(self):
+        self._w = None
+        if WEIGHTS_PATH and os.path.isfile(WEIGHTS_PATH):
+            with open(WEIGHTS_PATH) as f:
+                self._w = json.load(f)
+
+    def genmove(self, req):
+        from hgnn import Engine
+        bd = req["board"]
+        adj = [tuple(a) for a in bd["neighbors"]]
+        legal = bd.get("legalMask") or [1] * bd["n"]
+        eng = Engine(adj, level=req.get("level", "standard"), weights=self._w)
+        out = eng.pick_move(list(bd["stones"]), bd["toMove"], legal_mask=legal)
+        return out["move"], f"{self.name} · {out.get('reason', '')}"
+
+
+BOT = HGNNBot()
+```
+
+```bash
+cd bridge
+HGNN_WEIGHTS=../web/models/hgnn-sphere.weights.json python3 serve.py
+```
+
+→ the menu gains **HGNN (bridge)** alongside the online models.
+
+---
+
+## Zero — the canonical both-channel model
+
+An AlphaZero-method policy+value graph net, trained by **SGD self-play** with
+a PUCT replay buffer. Because its forward pass is small, it ships identically
+to the bridge (`zero_mini.py`) and to the browser (`--export-web`), and the JS
+forward pass mirrors `zeronet.py` exactly.
+
+**Train:**
+
+```bash
+cd python/train
+
+python3 train_zero.py --iters 100                        # all lowest topologies
+python3 train_zero.py --specs sphere,klein --sims 64     # a focused run
+```
+
+This writes `checkpoints/zero_mini.npz`. Continue onto bigger boards with the
+curriculum warm-start:
+
+```bash
+python3 train_zero.py --resume checkpoints/zero_mini.npz \
+    --specs torus2,klein2 --iters 120
+```
+
+**Play over the bridge** (native, automatic):
+
+```bash
+cd bridge && python3 serve.py       # 'Zero mini' appears once the .npz exists
+```
+
+Levels: `casual` samples the policy, `standard` plays its argmax, `strong`
+runs a 96-simulation PUCT search on the request's own graph.
+
+**Play online** — add one flag at train time to also emit a browser model:
+
+```bash
+cd python/train
+python3 train_zero.py --iters 100 --export-web zero-all   # -> web/models/zero-all.*
+cd ../web && node build.mjs ../geodesics.html
+```
+
+→ **Zero all** appears in the menu, running in-page (`casual` / `standard`;
+no MCTS in the browser). You can also export from an already-trained
+checkpoint by re-running with `--iters 0 --resume … --export-web <id>`.
+
+---
+
+## HATZ — bridge-native
+
+Holonomy-Aware Topological AlphaZero: the Zero method plus an orientation
+cocycle, cell incidences, a learned co-ownership **filtration**, and
+**hierarchical Morse–Smale pooling**, with gauge augmentation and an
+ownership auxiliary head. Trained by SGD self-play.
+
+**Train (self-play):**
+
+```bash
+cd python/train
+
+python3 train_hatz.py --iters 100                     # all lowest topologies
+python3 train_hatz.py --specs mobius,klein,rp2        # non-orientable focus
+python3 train_hatz.py --resume checkpoints/hatz.npz \
+    --specs torus2,klein2 --iters 150                 # curriculum onto bigger boards
+```
+
+**Train against a chosen opponent** (e.g. bootstrap Go from KataGo on the
+plane, then continue self-play onto the exotic surfaces — see
+`train_hatz_vs.py`):
+
+```bash
+# Phase 1 — learn from KataGo on the 9×9 (records both seats)
+python3 train_hatz_vs.py --specs plane9 --opponent katago-9x9 \
+    --opponent-level standard --learn-from both --iters 120 \
+    --checkpoint checkpoints/hatz_planar_katago.npz
+
+# Phase 2 — carry those weights onto the non-orientable boards, self-play
+python3 train_hatz_vs.py --specs sphere,cylinder,torus,mobius,klein,rp2 \
+    --opponent self --resume checkpoints/hatz_planar_katago.npz \
+    --iters 300 --checkpoint checkpoints/hatz_full.npz
+```
+
+Both write a `*.npz` checkpoint.
+
+**Play over the bridge** (native, automatic):
+
+```bash
+cd bridge && python3 serve.py                          # serves checkpoints/hatz.npz
+# or point at any checkpoint:
+HATZ_CKPT=../python/train/checkpoints/hatz_full.npz python3 serve.py
+```
+
+→ **HATZ** appears (`casual` samples, `standard` argmax, `strong` = 64-sim
+PUCT). It reconstructs the orientation cocycle from `nx`/`ny` so the
+Möbius/Klein/RP² seam lands correctly on remote boards.
+
+**Play online — not shipped.** Unlike Zero, HATZ has no browser port. Its
+strength comes from things that don't exist in the page: MCTS search, the
+Morse–Smale basin pooling, Cayley-geometric parallel transport, and the
+filtration levels. To run HATZ in-browser you would hand-port `hatz.py`'s
+`forward` to JS the way `zeronet.py` was ported for Zero — and even then only
+the **raw policy head** (value/ownership optional), with no search, so it
+would be a weak shadow of the bridged engine. For real HATZ play, use the
+bridge.
+
+---
+
+## KataGo — bridge-only, external
+
+Not trained here — KataGo is an external CNN engine over rectangles, so it is
+gated to `plane:square:vertices` and can only run on the bridge. Install the
+binary (`brew install katago` or a release build) and drop runtime
+`*.bin.gz` networks (from katagotraining.org — the *network file* links, not
+`.ckpt` checkpoints) into `bridge/nets/`:
+
+```
+bots/katago_b28.py        -> nets/katago_b28.bin.gz        (strong general)
+bots/katago_zhizi-b40.py  -> nets/katago_zhizi-b40.bin.gz  (strong general)
+bots/katago_9x9-b18.py    -> nets/katago_9x9-b18.bin.gz    (9×9 specialist)
+bots/katago-humanv0.py    -> nets/katago-humanv0.bin.gz    (human ranks)
+```
+
+```bash
+cd bridge && python3 serve.py     # each bot appears when its net + binary resolve
+```
+
+Strength maps to 24 / 200 / 1600 visits (`casual` / `standard` / `strong`);
+the human net instead offers rank levels (20 kyu … 9 dan), sampling the raw
+human policy at 1 visit under a `humanSLProfile`. A generic env slot exists
+too: `KATAGO_MODEL=/path/net.bin.gz python3 serve.py`. Test the adapter
+without a real KataGo: `python3 bridge/test_katago.py`.
+
+---
+
+## Random — both channels, no training
+
+- **Online:** `random.js` is bundled by `build.mjs` (built-in, always there).
+- **Bridge:** `bridge/bots/random_bot.py` serves it as **Random (bridge)**
+  (`py-random`) — this is also the annotated reference for the bot contract.
+
+Nothing to train.
+
+---
+
+## Cheat sheet
+
+| Goal | Command (run from) |
+|---|---|
+| Train HGNN specialist | `python3 train_hgnn.py --boards sphere --generations 60 --out hgnn-sphere` *(python/train)* |
+| Train Zero (all boards) | `python3 train_zero.py --iters 100` *(python/train)* |
+| Train Zero + browser export | `python3 train_zero.py --iters 100 --export-web zero-all` *(python/train)* |
+| Train HATZ self-play | `python3 train_hatz.py --iters 100` *(python/train)* |
+| Train HATZ vs KataGo → self-play | `train_hatz_vs.py --opponent katago-9x9 …` then `--opponent self --resume …` *(python/train)* |
+| Build the online app | `node build.mjs ../geodesics.html` *(web)* |
+| Start the bridge | `python3 serve.py` *(bridge)* |
+| Bridge a specific HATZ ckpt | `HATZ_CKPT=…/hatz_full.npz python3 serve.py` *(bridge)* |
+| Bridge a specific Zero ckpt | `ZERO_CKPT=…/zero_mini.npz python3 serve.py` *(bridge)* |
+| Bridge HGNN weights | `HGNN_WEIGHTS=…/hgnn-sphere.weights.json python3 serve.py` *(bridge)* |
+
+## End-to-end: everything at once
+
+```bash
+# 1. train (python/train/)
+cd python/train
+python3 train_hgnn.py --boards lowest --generations 80 --out hgnn-all
+python3 train_zero.py --iters 100 --export-web zero-all
+python3 train_hatz_vs.py --specs plane9 --opponent katago-9x9 --learn-from both \
+    --iters 120 --checkpoint checkpoints/hatz_planar_katago.npz
+python3 train_hatz_vs.py --specs sphere,torus,mobius,klein,rp2 --opponent self \
+    --resume checkpoints/hatz_planar_katago.npz --iters 300 \
+    --checkpoint checkpoints/hatz.npz
+
+# 2. bundle the online models into the page (web/)
+cd ../../web && node build.mjs ../geodesics.html
+#    -> menu gains: HGNN all, Zero all, Random, Hierarchical GNN (built-in)
+
+# 3. start the bridge for the heavy engines (bridge/)
+cd ../bridge && python3 serve.py
+#    -> menu also gains: HATZ, Zero mini, KataGo* (if nets present), py-random
+
+# 4. open geodesics.html — online models play with the bridge down;
+#    bridge models appear whenever serve.py is running.
+```
+
+Online and bridge coexist in the same Opponent menu: online models play with
+no server, and the bridge models fade in and out as `serve.py` starts and
+stops.
 
 })();
 // ---- models/random.js ----
@@ -3916,9 +4864,18 @@ function aiMove() {
 // a single vertex index (or -1 for pass) comes back. Legality stays with the
 // host Engine regardless of what the remote answers. See bridge/README.md.
 
-const BRIDGE_URL =
-  (typeof window !== "undefined" && window.GEO_BRIDGE_URL) ||
-  "ws://127.0.0.1:8765";
+// Resolution order: an explicit page global wins (self-hosted deployments),
+// then a bridge=<ws-url> link parameter (?bridge= or #bridge= — see
+// urlParams below; this makes "play against my server's engines" a
+// shareable link), then the local-development default. Only ws(s) URLs are
+// accepted from links.
+const BRIDGE_URL = (() => {
+  if (typeof window !== "undefined" && window.GEO_BRIDGE_URL)
+    return window.GEO_BRIDGE_URL;
+  const p = urlParams();
+  if (p.bridge && /^wss?:\/\//i.test(p.bridge)) return p.bridge;
+  return "ws://127.0.0.1:8765";
+})();
 const bridge = { ws: null, next: 1, pending: new Map(), models: [], timer: null };
 
 function bridgeRemoveModels() {
@@ -4137,6 +5094,8 @@ const EXPLAIN = {
     b: "Rewinds one move (including the superko history, so a retracted position becomes playable again)." }),
   "act.new": () => ({ t: "new board",
     b: "Rebuilds the board from the current Surface \u00D7 Mesh \u00D7 Scale spec and starts a fresh game." }),
+  "act.models": () => ({ t: "models \u2014 load trained networks",
+    b: "Add opponents by loading a <b>model card</b>: one JSON file carrying a trained network's weights plus its identity (name, strength levels, which boards it supports). Cards come from the training scripts (<code>--export-model</code>) and load from a file, a URL, or automatically from a <code>#model=&lt;url&gt;</code> link \u2014 so sharing an opponent is sharing a link, on desktop or phone. Only <b>weights</b> are ever loaded, never code: the card names one of this page's built-in runtimes \u2014 pure JavaScript for zero-style graph nets, or a sandboxed in-browser Python interpreter (Pyodide) that runs the actual hatz.py for HATZ, downloaded lazily on its first move and cached. Every reply is still validated by the host rules, so a bad card can at worst pass." }),
   "act.share": () => ({ t: "share \u2014 correspondence play",
     b: "Produces a code (and URL) encoding this exact game: the board spec plus every move. Send it to your opponent; they load it, play a move, and send the new code back \u2014 remote Go on any topology, no server involved. Codes are validated on load by replaying every move through the rules engine, so a corrupted code fails loudly instead of silently. The same sheet downloads and loads <b>SGF</b> files: standard SGF on the classical board, generalized SGF (gSGF, the python package's JSON dialect) on every other topology." }),
   "act.sgfdown": () => ({ t: "download SGF",
@@ -4460,7 +5419,143 @@ document.getElementById("paToggle").addEventListener("change", e => {
   state.showPA = e.target.checked; sync();
 });
 
-// ---------- boot ---------------------------------------------------------------
+// ---------- loadable models (GeoModels) ----------------------------------------
+// Trained networks arrive as portable JSON "model cards" (see loader.js):
+// picked as a file, fetched from a pasted URL, or auto-fetched from a
+// #model=<url> link. The loader validates the card and installs it into
+// GeoAI.models under one of the page's built-in runtimes — pure-JS for
+// zero-style graph nets, a lazily-booted Pyodide worker running the real
+// hatz.py for HATZ — so only weights are ever loaded, never code. The
+// hooks object is how a runtime asks the app about the current board
+// without loader.js ever reaching into app state: HATZ's orientation
+// cocycle needs the surface name and the grid shape to place the seam.
+
+const MODEL_HOOKS = {
+  boardInfo: () => {
+    const B = state.B || {};
+    // On derived (edges/faces/cells) boards training builds the Bundle
+    // from the derived graph with NO surface name and NO faces — the
+    // orientation cocycle is the trivial gauge there (see cells.derive /
+    // train_hatz.py). Reporting the same here keeps browser play
+    // bit-identical to training. On vertex boards we send everything we
+    // have: the mesh's 2-cells (verified face-for-face against python)
+    // and the lattice/embedding coordinates, so the worker's Bundle is
+    // the training Bundle. Boards whose face complex is deliberately
+    // withheld (partial covers: an open honeycomb rim) fall back to the
+    // faceless name-based cocycle, same as the bridge bots.
+    const vertexMode = state.incidence === "vertices";
+    return {
+      surface: vertexMode ? state.surface : null,
+      nx: B.nx || 0, ny: B.ny || 0,
+      faces: (vertexMode && B.meshFaces) || null,
+      coords: vertexMode ? (B.uv || B.pos || null) : null,
+    };
+  },
+};
+
+// Install a parsed card, refresh the Opponent menu, and report. Returns
+// the entry (or null after showing the error) — shared by all three entry
+// points (file, URL box, #model= link).
+function installModelCard(card, sourceLabel) {
+  let entry;
+  try { entry = GeoModels.install(card, GeoAI, MODEL_HOOKS); }
+  catch (e) { message("could not load model: " + e.message, 7000); return null; }
+  refreshOpponentOptions();
+  renderModelsList();
+  message("loaded model \u201C" + entry.name + "\u201D (" + entry.arch +
+    " runtime" + (entry.arch === "hatz"
+      ? "; python interpreter downloads on its first move" : "") + ")" +
+    (sourceLabel ? " from " + sourceLabel : ""), 7000);
+  return entry;
+}
+
+// The Models sheet's list of user-loaded models, with per-model Remove.
+// Built-in and bridge models are managed elsewhere and are not listed.
+function renderModelsList() {
+  const el2 = document.getElementById("modelsList");
+  const loaded = GeoModels.list(GeoAI);
+  if (!loaded.length) {
+    el2.innerHTML = '<div class="mrow"><span class="mname" style="color:var(--ink)">' +
+      "no loaded models yet</span></div>";
+    return;
+  }
+  el2.innerHTML = loaded.map(m =>
+    '<div class="mrow"><span class="mname">' + m.name + "</span>" +
+    '<span class="march">' + m.arch + " \u00B7 " + m.levels.join("/") +
+    '</span><button data-rm="' + m.id + '">remove</button></div>').join("");
+  el2.querySelectorAll("button[data-rm]").forEach(b =>
+    b.addEventListener("click", () => {
+      GeoModels.remove(GeoAI, b.dataset.rm);
+      refreshOpponentOptions();      // falls back to human if it was selected
+      renderModelsList();
+    }));
+}
+
+function openModels() {
+  renderModelsList();
+  document.getElementById("modelsModal").classList.add("open");
+}
+
+document.getElementById("modelsBtn").addEventListener("click", openModels);
+document.getElementById("modelsClose").addEventListener("click",
+  () => document.getElementById("modelsModal").classList.remove("open"));
+document.getElementById("modelsModal").addEventListener("click", e => {
+  if (e.target.id === "modelsModal")
+    document.getElementById("modelsModal").classList.remove("open");
+});
+// file picker path
+document.getElementById("modelFileBtn").addEventListener("click",
+  () => document.getElementById("modelFile").click());
+document.getElementById("modelFile").addEventListener("change", e => {
+  const f = e.target.files && e.target.files[0];
+  if (!f) return;
+  const reader = new FileReader();
+  reader.onload = () => {
+    try { installModelCard(GeoModels.fromText(String(reader.result)), f.name); }
+    catch (err) { message("could not load model: " + err.message, 7000); }
+  };
+  reader.onerror = () => message("could not read " + f.name);
+  reader.readAsText(f);
+  e.target.value = "";               // allow re-picking the same file later
+});
+// URL path (also used by the #model= boot link below)
+function loadModelURL(url) {
+  message("fetching model\u2026", 0);
+  GeoModels.fromURL(url).then(
+    card => installModelCard(card, new URL(url).hostname),
+    err => message("could not load model: " + err.message, 7000));
+}
+document.getElementById("modelURLBtn").addEventListener("click", () => {
+  const u = document.getElementById("modelURL").value.trim();
+  if (u) loadModelURL(u);
+});
+
+// ---------- URL parameters ------------------------------------------------------
+// The fragment (and, for the bridge, also the query string) is a tiny
+// parameter bag: #g=<code> restores a shared game, #model=<url> loads a
+// model card, and bridge=<ws-url> points the bridge client somewhere other
+// than localhost — which turns "play my server's engines" into a link:
+//   https://…/geodesics.html?bridge=wss://bots.example.org#model=https://…
+// Everything is optional and order-free; g= keeps its legacy first slot so
+// existing share URLs continue to work unchanged.
+function urlParams() {
+  const out = {};
+  try {
+    const add = (s) => {
+      for (const kv of s.split("&")) {
+        const q = kv.indexOf("=");
+        if (q > 0) out[kv.slice(0, q)] = decodeURIComponent(kv.slice(q + 1));
+      }
+    };
+    if (location.search && location.search.length > 1)
+      add(location.search.slice(1));
+    if (location.hash && location.hash.length > 1)
+      add(location.hash.slice(1));
+  } catch (e) { /* sandboxed frame: no location */ }
+  return out;
+}
+
+
 
 function resize() {
   const w = el.clientWidth, h = el.clientHeight;
@@ -4475,8 +5570,10 @@ refreshPaintOptions();
 newBoard(false);
 resize();
 try {
-  if (location.hash && location.hash.startsWith("#g=")) loadShare(location.hash);
+  const boot = urlParams();
+  if (boot.g) loadShare(boot.g);       // a shared game (legacy #g=... links)
   else syncHash();
+  if (boot.model) loadModelURL(boot.model);   // an auto-loading model link
 } catch (e) { /* no hash in sandbox */ }
 group.rotation.x = 0.35; group.rotation.y = -0.5;
 (function loop() { requestAnimationFrame(loop); renderer.render(scene, camera); })();

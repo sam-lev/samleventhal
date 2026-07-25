@@ -1431,9 +1431,18 @@ function aiMove() {
 // a single vertex index (or -1 for pass) comes back. Legality stays with the
 // host Engine regardless of what the remote answers. See bridge/README.md.
 
-const BRIDGE_URL =
-  (typeof window !== "undefined" && window.GEO_BRIDGE_URL) ||
-  "ws://127.0.0.1:8765";
+// Resolution order: an explicit page global wins (self-hosted deployments),
+// then a bridge=<ws-url> link parameter (?bridge= or #bridge= — see
+// urlParams below; this makes "play against my server's engines" a
+// shareable link), then the local-development default. Only ws(s) URLs are
+// accepted from links.
+const BRIDGE_URL = (() => {
+  if (typeof window !== "undefined" && window.GEO_BRIDGE_URL)
+    return window.GEO_BRIDGE_URL;
+  const p = urlParams();
+  if (p.bridge && /^wss?:\/\//i.test(p.bridge)) return p.bridge;
+  return "ws://127.0.0.1:8765";
+})();
 const bridge = { ws: null, next: 1, pending: new Map(), models: [], timer: null };
 
 function bridgeRemoveModels() {
@@ -1652,6 +1661,8 @@ const EXPLAIN = {
     b: "Rewinds one move (including the superko history, so a retracted position becomes playable again)." }),
   "act.new": () => ({ t: "new board",
     b: "Rebuilds the board from the current Surface \u00D7 Mesh \u00D7 Scale spec and starts a fresh game." }),
+  "act.models": () => ({ t: "models \u2014 load trained networks",
+    b: "Add opponents by loading a <b>model card</b>: one JSON file carrying a trained network's weights plus its identity (name, strength levels, which boards it supports). Cards come from the training scripts (<code>--export-model</code>) and load from a file, a URL, or automatically from a <code>#model=&lt;url&gt;</code> link \u2014 so sharing an opponent is sharing a link, on desktop or phone. Only <b>weights</b> are ever loaded, never code: the card names one of this page's built-in runtimes \u2014 pure JavaScript for zero-style graph nets, or a sandboxed in-browser Python interpreter (Pyodide) that runs the actual hatz.py for HATZ, downloaded lazily on its first move and cached. Every reply is still validated by the host rules, so a bad card can at worst pass." }),
   "act.share": () => ({ t: "share \u2014 correspondence play",
     b: "Produces a code (and URL) encoding this exact game: the board spec plus every move. Send it to your opponent; they load it, play a move, and send the new code back \u2014 remote Go on any topology, no server involved. Codes are validated on load by replaying every move through the rules engine, so a corrupted code fails loudly instead of silently. The same sheet downloads and loads <b>SGF</b> files: standard SGF on the classical board, generalized SGF (gSGF, the python package's JSON dialect) on every other topology." }),
   "act.sgfdown": () => ({ t: "download SGF",
@@ -1975,7 +1986,143 @@ document.getElementById("paToggle").addEventListener("change", e => {
   state.showPA = e.target.checked; sync();
 });
 
-// ---------- boot ---------------------------------------------------------------
+// ---------- loadable models (GeoModels) ----------------------------------------
+// Trained networks arrive as portable JSON "model cards" (see loader.js):
+// picked as a file, fetched from a pasted URL, or auto-fetched from a
+// #model=<url> link. The loader validates the card and installs it into
+// GeoAI.models under one of the page's built-in runtimes — pure-JS for
+// zero-style graph nets, a lazily-booted Pyodide worker running the real
+// hatz.py for HATZ — so only weights are ever loaded, never code. The
+// hooks object is how a runtime asks the app about the current board
+// without loader.js ever reaching into app state: HATZ's orientation
+// cocycle needs the surface name and the grid shape to place the seam.
+
+const MODEL_HOOKS = {
+  boardInfo: () => {
+    const B = state.B || {};
+    // On derived (edges/faces/cells) boards training builds the Bundle
+    // from the derived graph with NO surface name and NO faces — the
+    // orientation cocycle is the trivial gauge there (see cells.derive /
+    // train_hatz.py). Reporting the same here keeps browser play
+    // bit-identical to training. On vertex boards we send everything we
+    // have: the mesh's 2-cells (verified face-for-face against python)
+    // and the lattice/embedding coordinates, so the worker's Bundle is
+    // the training Bundle. Boards whose face complex is deliberately
+    // withheld (partial covers: an open honeycomb rim) fall back to the
+    // faceless name-based cocycle, same as the bridge bots.
+    const vertexMode = state.incidence === "vertices";
+    return {
+      surface: vertexMode ? state.surface : null,
+      nx: B.nx || 0, ny: B.ny || 0,
+      faces: (vertexMode && B.meshFaces) || null,
+      coords: vertexMode ? (B.uv || B.pos || null) : null,
+    };
+  },
+};
+
+// Install a parsed card, refresh the Opponent menu, and report. Returns
+// the entry (or null after showing the error) — shared by all three entry
+// points (file, URL box, #model= link).
+function installModelCard(card, sourceLabel) {
+  let entry;
+  try { entry = GeoModels.install(card, GeoAI, MODEL_HOOKS); }
+  catch (e) { message("could not load model: " + e.message, 7000); return null; }
+  refreshOpponentOptions();
+  renderModelsList();
+  message("loaded model \u201C" + entry.name + "\u201D (" + entry.arch +
+    " runtime" + (entry.arch === "hatz"
+      ? "; python interpreter downloads on its first move" : "") + ")" +
+    (sourceLabel ? " from " + sourceLabel : ""), 7000);
+  return entry;
+}
+
+// The Models sheet's list of user-loaded models, with per-model Remove.
+// Built-in and bridge models are managed elsewhere and are not listed.
+function renderModelsList() {
+  const el2 = document.getElementById("modelsList");
+  const loaded = GeoModels.list(GeoAI);
+  if (!loaded.length) {
+    el2.innerHTML = '<div class="mrow"><span class="mname" style="color:var(--ink)">' +
+      "no loaded models yet</span></div>";
+    return;
+  }
+  el2.innerHTML = loaded.map(m =>
+    '<div class="mrow"><span class="mname">' + m.name + "</span>" +
+    '<span class="march">' + m.arch + " \u00B7 " + m.levels.join("/") +
+    '</span><button data-rm="' + m.id + '">remove</button></div>').join("");
+  el2.querySelectorAll("button[data-rm]").forEach(b =>
+    b.addEventListener("click", () => {
+      GeoModels.remove(GeoAI, b.dataset.rm);
+      refreshOpponentOptions();      // falls back to human if it was selected
+      renderModelsList();
+    }));
+}
+
+function openModels() {
+  renderModelsList();
+  document.getElementById("modelsModal").classList.add("open");
+}
+
+document.getElementById("modelsBtn").addEventListener("click", openModels);
+document.getElementById("modelsClose").addEventListener("click",
+  () => document.getElementById("modelsModal").classList.remove("open"));
+document.getElementById("modelsModal").addEventListener("click", e => {
+  if (e.target.id === "modelsModal")
+    document.getElementById("modelsModal").classList.remove("open");
+});
+// file picker path
+document.getElementById("modelFileBtn").addEventListener("click",
+  () => document.getElementById("modelFile").click());
+document.getElementById("modelFile").addEventListener("change", e => {
+  const f = e.target.files && e.target.files[0];
+  if (!f) return;
+  const reader = new FileReader();
+  reader.onload = () => {
+    try { installModelCard(GeoModels.fromText(String(reader.result)), f.name); }
+    catch (err) { message("could not load model: " + err.message, 7000); }
+  };
+  reader.onerror = () => message("could not read " + f.name);
+  reader.readAsText(f);
+  e.target.value = "";               // allow re-picking the same file later
+});
+// URL path (also used by the #model= boot link below)
+function loadModelURL(url) {
+  message("fetching model\u2026", 0);
+  GeoModels.fromURL(url).then(
+    card => installModelCard(card, new URL(url).hostname),
+    err => message("could not load model: " + err.message, 7000));
+}
+document.getElementById("modelURLBtn").addEventListener("click", () => {
+  const u = document.getElementById("modelURL").value.trim();
+  if (u) loadModelURL(u);
+});
+
+// ---------- URL parameters ------------------------------------------------------
+// The fragment (and, for the bridge, also the query string) is a tiny
+// parameter bag: #g=<code> restores a shared game, #model=<url> loads a
+// model card, and bridge=<ws-url> points the bridge client somewhere other
+// than localhost — which turns "play my server's engines" into a link:
+//   https://…/geodesics.html?bridge=wss://bots.example.org#model=https://…
+// Everything is optional and order-free; g= keeps its legacy first slot so
+// existing share URLs continue to work unchanged.
+function urlParams() {
+  const out = {};
+  try {
+    const add = (s) => {
+      for (const kv of s.split("&")) {
+        const q = kv.indexOf("=");
+        if (q > 0) out[kv.slice(0, q)] = decodeURIComponent(kv.slice(q + 1));
+      }
+    };
+    if (location.search && location.search.length > 1)
+      add(location.search.slice(1));
+    if (location.hash && location.hash.length > 1)
+      add(location.hash.slice(1));
+  } catch (e) { /* sandboxed frame: no location */ }
+  return out;
+}
+
+
 
 function resize() {
   const w = el.clientWidth, h = el.clientHeight;
@@ -1990,8 +2137,10 @@ refreshPaintOptions();
 newBoard(false);
 resize();
 try {
-  if (location.hash && location.hash.startsWith("#g=")) loadShare(location.hash);
+  const boot = urlParams();
+  if (boot.g) loadShare(boot.g);       // a shared game (legacy #g=... links)
   else syncHash();
+  if (boot.model) loadModelURL(boot.model);   // an auto-loading model link
 } catch (e) { /* no hash in sandbox */ }
 group.rotation.x = 0.35; group.rotation.y = -0.5;
 (function loop() { requestAnimationFrame(loop); renderer.render(scene, camera); })();

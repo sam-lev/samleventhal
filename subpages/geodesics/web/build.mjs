@@ -6,7 +6,8 @@ import { readFileSync, writeFileSync, readdirSync, existsSync } from "fs";
 const read = (f) => readFileSync(f, "utf8");
 let html = read("shell.html");
 const parts = { "/*__CORE__*/": "core.js", "/*__CELLS__*/": "cells.js",
-                "/*__AI__*/": "ai.js", "/*__APP__*/": "app.js" };
+                "/*__AI__*/": "ai.js", "/*__LOADER__*/": "loader.js",
+                "/*__APP__*/": "app.js" };
 for (const [marker, file] of Object.entries(parts)) {
   if (!html.includes(marker)) throw new Error("missing marker " + marker);
   html = html.split(marker).join(read(file));

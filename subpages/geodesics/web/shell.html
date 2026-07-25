@@ -64,9 +64,19 @@
   #panelClose { position: absolute; top: 8px; right: 10px; border: none;
     background: none; color: var(--ink); font-size: 18px; padding: 2px 8px; }
 
-  #shareModal { position: fixed; inset: 0; z-index: 60; display: none;
+  #shareModal, .modal { position: fixed; inset: 0; z-index: 60; display: none;
     background: rgba(8,10,14,.72); align-items: center; justify-content: center; }
-  #shareModal.open { display: flex; }
+  #shareModal.open, .modal.open { display: flex; }
+  .sheet code { font: 11.5px/1.4 ui-monospace, Menlo, monospace;
+    color: var(--jade); }
+  #modelsList { margin: 6px 0; font-size: 13px; color: var(--bone); }
+  #modelsList .mrow { display: flex; align-items: baseline; gap: 8px;
+    padding: 3px 0; border-bottom: 1px dotted var(--line); }
+  #modelsList .mname { flex: 1; }
+  #modelsList .march { color: var(--ink); font-size: 12px; }
+  #modelsList button { padding: 2px 8px; font-size: 12px; }
+  #modelsClose { position: absolute; top: 8px; right: 10px; border: none;
+    background: none; color: var(--ink); font-size: 18px; padding: 2px 8px; }
   .sheet { background: var(--panel); border: 1px solid var(--line);
     border-radius: 12px; width: min(520px, calc(100vw - 28px));
     padding: 16px 18px; position: relative; }
@@ -105,6 +115,7 @@
     <button id="passBtn" class="info" data-info="act.pass">Pass</button>
     <button id="undoBtn" class="info" data-info="act.undo">Undo</button>
     <button id="shareBtn" class="info" data-info="act.share">Share</button>
+    <button id="modelsBtn" class="info" data-info="act.models">Models</button>
     <select id="paint" class="info" data-info="opt.paint" aria-label="Paint"></select>
     <label class="toggle info" data-info="opt.passalive">
       <input type="checkbox" id="paToggle"> pass-alive
@@ -124,6 +135,28 @@
   <button id="panelClose" aria-label="Close">&times;</button>
   <div id="panelTitle"></div>
   <div id="panelBody"></div>
+</div>
+
+<div id="modelsModal" class="modal">
+  <div class="sheet">
+    <button id="modelsClose" aria-label="Close">&times;</button>
+    <h3>Models</h3>
+    <p>Load a trained network as a <b>model card</b> &mdash; a single JSON
+       file written by <code>train_zero.py --export-model</code> or
+       <code>train_hatz.py --export-model</code>. Only weights are loaded,
+       never code: the card names one of this page's built-in runtimes.
+       Loaded models appear in the Opponent menu; links of the form
+       <code>#model=&lt;url&gt;</code> load automatically.</p>
+    <div id="modelsList"></div>
+    <div class="row">
+      <button id="modelFileBtn">Load model file&hellip;</button>
+      <input type="file" id="modelFile" accept=".json,.geomodel,application/json"
+             hidden aria-label="Model card file">
+    </div>
+    <p style="margin-top:12px">Or fetch a card from a URL:</p>
+    <input id="modelURL" placeholder="https://&hellip;/model.geomodel.json">
+    <div class="row"><button id="modelURLBtn">Fetch</button></div>
+  </div>
 </div>
 
 <div id="shareModal">
@@ -160,6 +193,9 @@
 </script>
 <script>
 /*__AI__*/
+</script>
+<script>
+/*__LOADER__*/
 </script>
 <script>
 /*__MODELS__*/

@@ -285,6 +285,56 @@ function seamCheck(B, tol) {
   }
 }
 
+// ---------- model cards: validation, install semantics, zero runtime -----------
+// The loader is the trust boundary for user-supplied models, so its
+// rejection paths are tested as thoroughly as its happy path. The zero
+// runtime's numerics are cross-checked against python/train/zeronet.py by
+// the training pipeline (see --export-model); here we assert the contract:
+// cards install/replace/remove cleanly and pickMove returns a legal move.
+{
+  const GeoModels = require("./loader.js");
+  // a minimal but shape-correct zero card (random weights, hidden 4 / 1 layer)
+  const D = 4;
+  const vec = (n) => Array.from({ length: n }, () => Math.random() - 0.5);
+  const mat = (r, c) => Array.from({ length: r }, () => vec(c));
+  const card = {
+    format: "geo-model-1", arch: "zero", id: "t-zero", name: "test zero",
+    levels: ["standard"], supports: null, hidden: D, layers: 1,
+    meta: {}, params: { W0: mat(5, D), b0: vec(D),
+                        Ws0: mat(D, D), Wn0: mat(D, D), b1: vec(D),
+                        wp: vec(D), bp: vec(1), wq: vec(D), bq: vec(1),
+                        wv: vec(D), bv: vec(1) },
+  };
+  ok(GeoModels.validate(card) === null, "model card: a sound card validates");
+  ok(!!GeoModels.validate({ ...card, format: "v2" }),
+     "model card: wrong format rejected");
+  ok(!!GeoModels.validate({ ...card, arch: "cnn" }),
+     "model card: unknown architecture rejected");
+  ok(!!GeoModels.validate({ ...card, params: { ...card.params, b1: [1] } }),
+     "model card: wrong parameter shape rejected");
+  ok(!!GeoModels.validate({ ...card, id: "a:b" }),
+     "model card: id with ':' rejected (would break the opponent encoding)");
+  const reg = { models: [] };
+  const entry = GeoModels.install(card, reg, {});
+  GeoModels.install({ ...card, name: "test zero v2" }, reg, {});
+  ok(reg.models.length === 1 && reg.models[0].name === "test zero v2",
+     "model card: re-installing an id replaces, not duplicates");
+  // pickMove on a small torus: must return -1 or a masked-legal vertex
+  const g = core.gridQuotient(5, 5, true, true, false, false, "square");
+  const eng2 = entry.create(g.adj, { level: "standard" });
+  const stones = new Array(25).fill(0); stones[7] = 1;
+  const legal = new Uint8Array(25).fill(1); legal[7] = 0;
+  const r2 = eng2.pickMove(stones, 2, { legalMask: legal });
+  ok(typeof r2.move === "number" &&
+     (r2.move === -1 || (legal[r2.move] === 1 && stones[r2.move] === 0)),
+     "model card: zero runtime picks a legal move (or passes)");
+  ok(GeoModels.remove(reg, "t-zero") && reg.models.length === 0,
+     "model card: remove() uninstalls a loaded model");
+  ok(typeof GeoModels._hatzGlue === "string" &&
+     GeoModels._hatzGlue.includes("def genmove"),
+     "model card: hatz python glue is exported for the training-parity test");
+}
+
 // ---------- boot smoke: execute the BUILT page end-to-end -----------------------
 // This is the test that guards against exactly one class of shipping accident:
 // a page that parses but dies at boot (e.g. a call to a function a bad merge

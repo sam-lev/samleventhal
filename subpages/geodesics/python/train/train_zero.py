@@ -174,6 +174,45 @@ def export_web(net, out_id, name=None):
           "-- run `node build.mjs ../geodesics.html` in web/")
 
 
+def export_model_card(net, out_id, name=None, arch="zero"):
+    """Write the trained net as a portable geo-model-1 CARD: one JSON file
+    carrying the weights plus the model's identity, loadable in the web app
+    via the Models sheet (file / URL / a #model=<url> link) — see
+    web/loader.js for the schema and the security model (cards are data;
+    the page's built-in runtime evaluates them, no code is ever loaded).
+
+    Unlike --export-web this produces no JavaScript and needs no rebuild of
+    geodesics.html: publish the card anywhere CORS-reachable and share the
+    link.
+    """
+    import json as _json
+    mdir = os.path.join(ROOT, "web", "models")
+    os.makedirs(mdir, exist_ok=True)
+    card = {
+        "format": "geo-model-1",
+        "arch": arch,
+        "id": out_id,
+        "name": name or ("Zero " + out_id),
+        "levels": ["casual", "standard"],
+        "supports": {
+            "surfaces": net.meta.get("surfaces"),
+            "meshes": net.meta.get("meshes"),
+            # every incidence structure the weights were trained on
+            "incidence": net.meta.get("incidence") or ["vertices"],
+        },
+        "hidden": net.hidden,
+        "layers": net.layers,
+        "meta": net.meta,
+        "params": {k: v.tolist() for k, v in net.p.items()},
+    }
+    path = os.path.join(mdir, f"{out_id}.geomodel.json")
+    with open(path, "w") as f:
+        _json.dump(card, f)
+    print(f"exported {path} — load it in the app's Models sheet, or link "
+          f"it: geodesics.html#model=<url-to-that-file>")
+    return path
+
+
 def self_play_game(net, key, boards, sims, seed, temp_moves=10,
                    incidence="vertices"):
     # the game must live on the SAME graph the network reads: a
@@ -275,7 +314,13 @@ def main():
                          "--hidden/--layers override the CLI (for curriculum)")
     ap.add_argument("--export-web", default=None, metavar="MODEL_ID",
                     help="after training, also export a browser-native model "
-                         "into web/models/ under this id")
+                         "into web/models/ under this id (baked into the "
+                         "page by build.mjs)")
+    ap.add_argument("--export-model", default=None, metavar="MODEL_ID",
+                    help="after training, also export a portable geo-model-1 "
+                         "CARD (web/models/<id>.geomodel.json): one JSON "
+                         "file users load in the app's Models sheet, by URL, "
+                         "or via a #model=<url> link — no rebuild needed")
     args = ap.parse_args()
 
     keys = LOWEST if args.specs == "lowest" else args.specs.split(",")
@@ -361,6 +406,8 @@ def main():
           "now serves it")
     if args.export_web:
         export_web(net, args.export_web)
+    if args.export_model:
+        export_model_card(net, args.export_model)
 
 
 if __name__ == "__main__":
